@@ -169,8 +169,10 @@ def tool_get_convergence_picks(args: dict, tier: str) -> dict:
     out = {"as_of": _mtime_iso("convergence_alerts.csv"),
            "tier": tier, "count": len(picks), "picks": picks}
     if tier == "free":
-        out["note"] = ("free tier returns the top 3 — upgrade to the "
-                       "'intelligence' tier for full depth")
+        out["note"] = ("free tier returns the top 3. Full board + 4 more tools: "
+                       "get a key at https://catalystedgescanner.com/pricing/ or "
+                       "request a free developer key via POST "
+                       "https://catalystedgescanner.com/api/v1/filing/signup")
     return out
 
 
