@@ -1,0 +1,16 @@
+[Unit]
+Description=Catalyst Edge MCP server (HTTP transport — agent-native API)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/catalyst
+Environment=CATALYST_MCP_HTTP=1
+Environment=CATALYST_MCP_HOST=127.0.0.1
+Environment=CATALYST_MCP_PORT=8848
+ExecStart=/usr/bin/python3 /opt/catalyst/mcp_server/catalyst_mcp.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
