@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
   "name": "com.catalystedgescanner/catalyst-edge-mcp",
-  "description": "Audited SEC catalyst intelligence for agents — ranked filing-driven stock signals with a public hit/miss track record. Free tier, no key needed.",
+  "description": "Audited SEC catalyst signals for agents — ranked filing intel with a public track record. Free tier.",
   "repository": {
     "url": "https://github.com/catalystedgepro-wq/catalyst-edge-mcp",
     "source": "github"
