@@ -34,6 +34,22 @@ Paid tiers use a Bearer token: `Authorization: Bearer <your-key>`.
 
 **free** — evaluation tier, no key required. **intelligence** — all tools, full depth; keys via [catalystedgescanner.com/pricing](https://catalystedgescanner.com/pricing/) or catalystedgepro@gmail.com.
 
+### Data freshness
+
+Every data-backed response carries a `freshness` block so consumers never
+mistake a stale snapshot for today's:
+
+```json
+"as_of": "2026-07-06T12:30:00+00:00",
+"freshness": { "stale": false, "age_hours": 2.1 }
+```
+
+The snapshots are refreshed each trading morning before the open. If the
+pipeline stalls (or the market is closed), `freshness.stale` flips to `true`
+with an explanatory `note` and `age_hours`, e.g. a Friday snapshot read the
+following Monday. The threshold defaults to 24h and is tunable per deploy with
+`CATALYST_STALE_AFTER_HOURS`.
+
 ## Claude Desktop / Cursor config (stdio, self-hosted)
 
 ```json

@@ -163,8 +163,19 @@ def main() -> int:
         res = resp.get(rid, {}).get("result", {})
         if res.get("isError") or not res.get("content"):
             failures.append(f"{label}: error or empty -> {res}")
+            continue
+        print(f"  ok  {label}")
+        # Every data-backed response must carry a freshness assessment so a
+        # stalled pipeline surfaces instead of serving stale data silently.
+        try:
+            payload = json.loads(res["content"][0]["text"])
+        except (KeyError, IndexError, ValueError):
+            payload = {}
+        fresh = payload.get("freshness")
+        if not isinstance(fresh, dict) or "stale" not in fresh:
+            failures.append(f"{label}: missing freshness assessment -> {fresh}")
         else:
-            print(f"  ok  {label}")
+            print(f"  ok  {label} freshness (stale={fresh.get('stale')})")
 
     # Free tier: an intelligence-only tool must be gated.
     gated = run("", [{"jsonrpc": "2.0", "id": 1, "method": "tools/call",
