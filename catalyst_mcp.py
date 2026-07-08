@@ -42,7 +42,7 @@ from pathlib import Path
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "catalyst-edge"
-SERVER_VERSION = "1.0.0"
+SERVER_VERSION = "1.1.0"
 
 _HERE = Path(__file__).resolve().parent
 # Data root: env override, else the workspace root (parent of mcp_server/).
@@ -82,6 +82,45 @@ def _mtime_iso(name: str):
             ts, datetime.timezone.utc).isoformat(timespec="seconds")
     except OSError:
         return None
+
+
+# ── data freshness ───────────────────────────────────────────────────────────
+# The scanner pipeline refreshes snapshots every trading morning; the longest
+# healthy gap is a 3-day holiday weekend (~96h). Anything older means the
+# upstream pipeline has stopped and the picks are historical, not current.
+STALE_AFTER_HOURS = _num(os.environ.get("CATALYST_STALE_AFTER_HOURS"), 100.0)
+
+# The primary snapshot — its mtime is the freshness signal for /health.
+PRIMARY_SNAPSHOT = "convergence_alerts.csv"
+
+
+def _age_hours(as_of_iso):
+    if not as_of_iso:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(as_of_iso.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    return max(0.0, (now - dt).total_seconds() / 3600)
+
+
+def _stale_fields(as_of_iso) -> dict:
+    """Fields to merge into a payload whose snapshot is past the threshold.
+    Empty dict when the snapshot is fresh (or has no parseable timestamp)."""
+    age = _age_hours(as_of_iso)
+    if age is None or age <= STALE_AFTER_HOURS:
+        return {}
+    return {
+        "stale": True,
+        "stale_warning": (
+            f"snapshot is {age:.0f}h old (threshold "
+            f"{STALE_AFTER_HOURS:.0f}h) — the upstream scanner pipeline has "
+            "likely stopped updating; treat these picks as historical, not "
+            "current"),
+    }
 
 
 # ── Tradier options / market data ────────────────────────────────────────────
@@ -424,6 +463,8 @@ def handle_tools_call(params: dict, tier: str) -> dict:
         return {"content": [{"type": "text", "text": msg}], "isError": True}
     try:
         result = tool["handler"](args, tier)
+        if isinstance(result, dict) and result.get("as_of"):
+            result.update(_stale_fields(result["as_of"]))
         return {"content": [{"type": "text",
                              "text": json.dumps(result, indent=2)}],
                 "isError": False}
@@ -521,8 +562,18 @@ def run_http(host: str, port: int) -> int:
 
         def do_GET(self):
             if self.path.rstrip("/") in ("", "/health"):
-                self._send(200, {"status": "ok", "server": SERVER_NAME,
-                                 "version": SERVER_VERSION})
+                as_of = _mtime_iso(PRIMARY_SNAPSHOT)
+                age = _age_hours(as_of)
+                payload = {
+                    "status": "ok", "server": SERVER_NAME,
+                    "version": SERVER_VERSION,
+                    "data_as_of": as_of,
+                    "data_age_hours": round(age, 1) if age is not None else None,
+                }
+                payload.update(_stale_fields(as_of))
+                if as_of is None or payload.get("stale"):
+                    payload["status"] = "stale"
+                self._send(200, payload)
             else:
                 self._send(404, {"error": "not found"})
 
