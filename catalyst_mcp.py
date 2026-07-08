@@ -51,6 +51,17 @@ KEYS_FILE = _HERE / "mcp_keys.json"
 
 TIER_RANK = {"free": 0, "intelligence": 1}
 
+# Data-freshness guard. The upstream pipeline refreshes the CSV/JSON snapshots
+# each trading morning before the open. If it stalls, the server must not keep
+# presenting an old snapshot as "today's" — every data-backed response carries a
+# staleness assessment so agents (and the site) can tell. Tunable per deploy;
+# on weekends/holidays there is no fresh snapshot, so exceeding the threshold is
+# expected and simply means "this is last-known, not today's."
+try:
+    STALE_AFTER_HOURS = float(os.environ.get("CATALYST_STALE_AFTER_HOURS") or 24)
+except ValueError:
+    STALE_AFTER_HOURS = 24.0
+
 
 def log(msg: str) -> None:
     """Diagnostics go to stderr — stdout is the MCP protocol channel."""
@@ -82,6 +93,42 @@ def _mtime_iso(name: str):
             ts, datetime.timezone.utc).isoformat(timespec="seconds")
     except OSError:
         return None
+
+
+def _parse_iso(as_of):
+    """Parse an ISO-8601 timestamp (with offset or trailing 'Z') to an aware
+    UTC datetime, or None if absent/unparseable."""
+    if not as_of:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(str(as_of).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(datetime.timezone.utc)
+
+
+def _freshness(as_of) -> dict:
+    """Staleness assessment for a snapshot's `as_of` timestamp.
+
+    Returns {stale, age_hours} and, when stale, a human-readable `note`. Stale
+    means the snapshot is older than STALE_AFTER_HOURS — either the pre-market
+    pipeline did not refresh (a real problem) or the market was closed
+    (expected). Either way the caller learns the data is not today's instead of
+    being handed it silently."""
+    dt = _parse_iso(as_of)
+    if dt is None:
+        return {"stale": True, "age_hours": None,
+                "note": "data timestamp unavailable — treat freshness as unknown"}
+    age_h = (datetime.datetime.now(datetime.timezone.utc) - dt).total_seconds() / 3600.0
+    age_h = round(age_h, 1)
+    if age_h <= STALE_AFTER_HOURS:
+        return {"stale": False, "age_hours": age_h}
+    return {"stale": True, "age_hours": age_h,
+            "note": (f"snapshot is {round(age_h / 24, 1)} day(s) old (as_of "
+                     f"{as_of}); the pre-market pipeline may not have refreshed. "
+                     f"Treat as last-known, not today's.")}
 
 
 # ── Tradier options / market data ────────────────────────────────────────────
@@ -166,7 +213,8 @@ def tool_get_convergence_picks(args: dict, tier: str) -> dict:
         "signals_fired": r.get("signals_fired"),
         "sector": r.get("sector"),
     } for r in rows[:limit]]
-    out = {"as_of": _mtime_iso("convergence_alerts.csv"),
+    as_of = _mtime_iso("convergence_alerts.csv")
+    out = {"as_of": as_of, "freshness": _freshness(as_of),
            "tier": tier, "count": len(picks), "picks": picks}
     if tier == "free":
         out["note"] = ("free tier returns the top 3. Full board + 4 more tools: "
@@ -191,8 +239,10 @@ def tool_get_ticker_signal(args: dict, tier: str) -> dict:
             f"ticker '{ticker}' is not in today's convergence universe")
     layers = {k: _num(v) for k, v in row.items()
               if k.endswith("_pts") and _num(v) != 0}
+    as_of = _mtime_iso("convergence_alerts.csv")
     return {
-        "as_of": _mtime_iso("convergence_alerts.csv"),
+        "as_of": as_of,
+        "freshness": _freshness(as_of),
         "ticker": ticker,
         "convergence_score": _num(row.get("convergence_score")),
         "conviction_level": row.get("conviction_level"),
@@ -217,7 +267,8 @@ def tool_get_thesis(args: dict, tier: str) -> dict:
         raise ToolError(
             f"no thesis for '{ticker}' — theses cover the top "
             f"{data.get('top_n', 'N')} convergence picks")
-    return {"ticker": ticker, "as_of": data.get("generated_utc"),
+    as_of = data.get("generated_utc")
+    return {"ticker": ticker, "as_of": as_of, "freshness": _freshness(as_of),
             "thesis": thesis}
 
 
@@ -233,7 +284,8 @@ def tool_get_sector_lean(args: dict, tier: str) -> dict:
         "contributors_count": r.get("contributors_count"),
     } for r in rows]
     sectors.sort(key=lambda s: s["lean_pts"], reverse=True)
-    return {"as_of": _mtime_iso("orphan_sector_lean.csv"),
+    as_of = _mtime_iso("orphan_sector_lean.csv")
+    return {"as_of": as_of, "freshness": _freshness(as_of),
             "count": len(sectors), "sectors": sectors}
 
 
@@ -256,7 +308,8 @@ def tool_get_track_record(args: dict, tier: str) -> dict:
         "avg_realistic_pnl_net_pct": _num(r.get("avg_realistic_pnl_net_pct")),
         "cohort_90d_hit_rate_2pct": _num(r.get("cohort_90d_hit_rate_2pct")),
     } for r in rows]
-    return {"as_of": _mtime_iso("sec_outcome_summary.csv"),
+    as_of = _mtime_iso("sec_outcome_summary.csv")
+    return {"as_of": as_of, "freshness": _freshness(as_of),
             "count": len(records), "track_record": records}
 
 
@@ -317,7 +370,9 @@ TOOLS = [
         "name": "get_convergence_picks",
         "description": ("Today's top scored catalyst picks from the Catalyst "
                         "Edge convergence model. Optional filters: conviction, "
-                        "sector. Free tier returns the top 3."),
+                        "sector. Free tier returns the top 3. Every response "
+                        "carries a `freshness` block (as_of, age, stale flag) — "
+                        "check it before treating the snapshot as today's."),
         "min_tier": "free",
         "handler": tool_get_convergence_picks,
         "inputSchema": {
