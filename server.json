@@ -1,12 +1,13 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "com.catalystedgescanner/catalyst-edge-mcp",
-  "description": "Audited SEC catalyst signals for agents — ranked filing intel with a public track record. Free tier.",
+  "description": "Audited SEC catalyst signals for agents — ranked filing intel with a public track record.",
+  "version": "1.0.2",
+  "websiteUrl": "https://catalystedgescanner.com",
   "repository": {
     "url": "https://github.com/catalystedgepro-wq/catalyst-edge-mcp",
     "source": "github"
   },
-  "version": "1.0.0",
   "remotes": [
     {
       "type": "streamable-http",
