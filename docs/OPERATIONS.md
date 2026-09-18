@@ -138,7 +138,13 @@ python3 -m kronos_pipeline.ohlcv --from-convergence
 
 # 2. score it (needs torch + a Kronos checkout)
 python3 -m kronos_pipeline.score --from-convergence --kronos-src /opt/kronos
+
+# 3. archive the day, so the board can be evaluated later (stdlib only)
+python3 -m backtest.snapshot
 ```
+
+Step 3 is not optional if you ever intend to measure whether any of this
+works — see [Backtesting](#backtesting--and-why-it-can-only-start-now).
 
 Stage 1 writes `/opt/catalyst/ohlcv/<TICKER>.csv`, retaining 600 bars and
 re-pulling the last 5 sessions each run (exchanges restate volume after close).
@@ -193,6 +199,80 @@ rows, so there is nothing to join a forecast against. Until a per-pick outcome
 ledger exists, treat `get_price_forecast` as an independent signal on offer,
 not as a validated edge — and do not fine-tune against a baseline you cannot
 measure.
+
+## Backtesting — and why it can only start now
+
+The question "does Kronos add alpha over the convergence score" needs a
+per-pick outcome record: which ticker was picked on which day, and what it
+then did. **Catalyst Edge has never kept one.** `sec_outcome_summary.csv` is
+aggregated per list (`list_name, rows, wins, losses, hit_rate_*, avg_alpha_*`)
+with no per-pick rows, and `convergence_alerts.csv` is overwritten in place on
+every run — so each day's board is destroyed by the next.
+
+Confirm this on your own droplet rather than taking it on faith:
+
+```bash
+python3 -m backtest.inspect_data
+```
+
+It inventories every CSV under the data root, reports real headers, row
+counts, value samples and date ranges, and states whether any file carries
+both a ticker column and a date column. It assumes no schema — `--emit-mapping`
+writes a stub with each guess and the evidence behind it, for you to correct.
+
+### Start the clock
+
+Past picks are unrecoverable. Evaluation data can only accumulate forward, so
+this wants to be running today:
+
+```bash
+python3 -m backtest.snapshot          # after the scoring pipeline, daily
+python3 -m backtest.snapshot --status # how many days have accumulated
+```
+
+It archives `convergence_alerts.csv`, `kronos_forecasts.csv` and
+`orphan_sector_lean.csv` into `snapshots/<kind>/<YYYY-MM-DD>.csv`, keyed by
+each source file's **mtime date**, not today's — a pipeline finishing at 23:50
+and a snapshot at 00:05 still agree on which day the picks belong to. It is
+idempotent and never overwrites without `--force`.
+
+### Evaluate, once there is enough
+
+```bash
+python3 -m backtest.evaluate --horizon 5
+```
+
+Joins the snapshots to the OHLCV cache, writes `backtest_ledger.csv` (the
+per-pick record that never existed), and ranks each predictor by quantile
+bucket plus Spearman correlation against realized forward return.
+
+**Entry timing matters more than the statistics.** Picks are ranked before the
+open from data through the prior close, so entry is the pick date's OPEN and
+exit is the close `--horizon` sessions later. Using the pick date's close as
+entry would let a pick see the move it is being judged on — an easy way to
+manufacture an edge that does not exist. If your pipeline actually publishes
+intraday, `--entry close` is the honest setting and the default is wrong for
+you.
+
+`--horizon 5` is a choice, not a default worth trusting. Run 1, 5 and 20 and
+see whether any apparent edge survives; one that appears at a single horizon
+usually is not one.
+
+### Do not read it too early
+
+Below ~200 picks over 20+ days the tool prints a warning and you should
+believe it. Bucket means at small n are dominated by noise, and a few percent
+of spread is not evidence. `backtest/test_backtest.py` plants a known signal
+in one predictor and pure noise in another and requires the evaluator to find
+the first and reject the second — that is what keeps it from reporting edge
+where there is none, but it cannot save you from reading 30 picks as a result.
+
+### Only then, fine-tuning
+
+Fine-tuning Kronos is the last step, not the next one. It needs a GPU the
+droplet does not have, and until the backtest shows the base model
+contributing something, there is no baseline to improve on and no way to tell
+whether a fine-tune helped.
 
 ## Usage logging — the gap
 

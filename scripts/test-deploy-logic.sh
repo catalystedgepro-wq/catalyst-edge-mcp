@@ -70,6 +70,13 @@ PY
 
 git archive --format=tar HEAD | gzip > "$SB/release.tgz"
 
+# The version the release actually carries. Read it from the tarball rather
+# than hardcoding: a version bump must not break this test.
+REL_VERSION="$(tar xzOf "$SB/release.tgz" catalyst_mcp.py \
+  | sed -n 's/^SERVER_VERSION = "\(.*\)"/\1/p' | head -1)"
+[ -n "$REL_VERSION" ] || { echo "could not read SERVER_VERSION from release" >&2; exit 1; }
+echo "release version: ${REL_VERSION}"
+
 run_remote() {
   env -i PATH="$SB/bin:/usr/bin:/bin" SB_ROOT="$SB" REV="${1:-testrev}" \
     REMOTE_ROOT="$SB/opt/catalyst" REMOTE_APP="$APP" SERVICE=catalyst-mcp \
@@ -81,7 +88,7 @@ echo "1. a good release lands, secrets survive"
 cp "$SB/release.tgz" "$TARBALL"
 run_remote good && rc=0 || rc=$?
 check "[ $rc -eq 0 ]"                                          "deploy succeeded"
-check "grep -q 'SERVER_VERSION = \"1.0.2\"' '$APP/catalyst_mcp.py'"  "new code landed"
+check "grep -q 'SERVER_VERSION = \"$REL_VERSION\"' '$APP/catalyst_mcp.py'" "new code landed (v$REL_VERSION)"
 check "grep -q live-customer-key '$APP/mcp_keys.json'"         "mcp_keys.json preserved"
 check "grep -q secret-token '$SB/opt/catalyst/.env'"           ".env preserved"
 check "[ -x '$APP/scripts/runner.sh' ]"                        "exec bits survived git archive"

@@ -1,0 +1,224 @@
+#!/usr/bin/env python3
+"""inspect_data.py — inventory what is actually in the data root.
+
+Run this ON THE DROPLET before building anything that reads its files. It
+reports observed facts — real headers, row counts, value samples, date ranges
+— and proposes a column mapping for a human to confirm. It never assumes a
+schema and never writes to any existing file.
+
+  python3 -m backtest.inspect_data                    # human-readable report
+  python3 -m backtest.inspect_data --emit-mapping     # + a mapping stub to edit
+
+The mapping stub goes to $CATALYST_DATA_ROOT/backtest_mapping.json. Nothing
+consumes it until you have read it and corrected the guesses; every proposed
+role is marked with the evidence behind it so you can check the reasoning
+rather than trust it.
+
+Stdlib only.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+DATA_ROOT = Path(os.environ.get("CATALYST_DATA_ROOT", "/opt/catalyst"))
+MAPPING_FILE = DATA_ROOT / "backtest_mapping.json"
+
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+TICKER_RE = re.compile(r"^[A-Z][A-Z.\-]{0,6}$")
+SAMPLE_ROWS = 400
+
+
+def log(msg: str = "") -> None:
+    print(msg, file=sys.stdout)
+
+
+def _looks_numeric(v: str) -> bool:
+    try:
+        float(v)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def profile_column(name: str, values: list[str]) -> dict:
+    """Describe a column from its contents. Observation, not inference."""
+    vals = [v for v in values if v not in ("", None)]
+    n = len(vals)
+    if not n:
+        return {"column": name, "nonempty": 0, "kind": "empty", "evidence": "all blank"}
+
+    dates = sum(1 for v in vals if DATE_RE.match(v))
+    tickers = sum(1 for v in vals if TICKER_RE.match(v))
+    nums = sum(1 for v in vals if _looks_numeric(v))
+    distinct = len(set(vals))
+
+    if dates / n > 0.9:
+        kind, ev = "date", f"{dates}/{n} match YYYY-MM-DD"
+    elif nums / n > 0.9:
+        kind, ev = "numeric", f"{nums}/{n} parse as float"
+    elif tickers / n > 0.8 and distinct / n > 0.5:
+        # Cardinality separates a ticker column from a categorical one:
+        # conviction_level (HIGH/MEDIUM/LOW) also matches the symbol pattern,
+        # but repeats across rows where a ticker in one snapshot does not.
+        kind, ev = "ticker", f"{tickers}/{n} look like symbols, {distinct} distinct"
+    elif distinct <= max(12, n // 20):
+        kind, ev = "categorical", f"{distinct} distinct values over {n} rows"
+    else:
+        kind, ev = "text", f"{distinct} distinct values"
+
+    out = {"column": name, "nonempty": n, "distinct": distinct,
+           "kind": kind, "evidence": ev, "sample": vals[:3]}
+    if kind == "date":
+        out["range"] = [min(vals), max(vals)]
+    return out
+
+
+def profile_csv(path: Path) -> dict:
+    with path.open(newline="", encoding="utf-8", errors="replace") as f:
+        reader = csv.DictReader(f)
+        header = reader.fieldnames or []
+        rows, total = [], 0
+        for row in reader:
+            total += 1
+            if len(rows) < SAMPLE_ROWS:
+                rows.append(row)
+    cols = [profile_column(h, [r.get(h, "") for r in rows]) for h in header]
+    return {"file": str(path.relative_to(DATA_ROOT)), "rows": total,
+            "columns": cols}
+
+
+def find_files() -> list[Path]:
+    out = []
+    for p in sorted(DATA_ROOT.rglob("*.csv")):
+        # The OHLCV cache is ours and its schema is known; skip the noise.
+        if "ohlcv" in p.parts or p.name.endswith(".tmp"):
+            continue
+        out.append(p)
+    return out
+
+
+def ledger_verdict(profiles: list[dict]) -> tuple[str, list[str]]:
+    """Does a per-pick outcome ledger exist? A ledger needs, in one file, a
+    ticker column AND a date column AND more than one row per ticker over
+    time. Aggregated summaries have none of that."""
+    candidates = []
+    for pr in profiles:
+        kinds = {c["column"]: c["kind"] for c in pr["columns"]}
+        has_ticker = any(k == "ticker" for k in kinds.values())
+        has_date = any(k == "date" for k in kinds.values())
+        if has_ticker and has_date:
+            candidates.append(pr["file"])
+    if candidates:
+        return "FOUND", candidates
+    return "ABSENT", []
+
+
+def propose_mapping(profiles: list[dict]) -> dict:
+    """A stub for a human to correct. Every guess carries its evidence."""
+    files = {}
+    for pr in profiles:
+        roles = {}
+        for c in pr["columns"]:
+            if c["kind"] in ("ticker", "date"):
+                roles.setdefault(c["kind"], []).append(c["column"])
+        files[pr["file"]] = {
+            "rows": pr["rows"],
+            "all_columns": [c["column"] for c in pr["columns"]],
+            "proposed": {k: v[0] for k, v in roles.items()},
+            "alternatives": {k: v[1:] for k, v in roles.items() if len(v) > 1},
+        }
+    return {
+        "_README": [
+            "Generated by backtest.inspect_data. EDIT BEFORE USE.",
+            "'proposed' values are guesses from column contents, not knowledge",
+            "of your pipeline. Correct them, then set confirmed=true.",
+        ],
+        "confirmed": False,
+        "pick_history": {
+            "_note": ("Which file records what was picked, and when. If none "
+                      "exists, leave null and run backtest.snapshot daily to "
+                      "start accumulating one."),
+            "file": None, "ticker_column": None, "date_column": None,
+            "score_column": None,
+        },
+        "observed_files": files,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--emit-mapping", action="store_true",
+                    help=f"also write a mapping stub to {MAPPING_FILE}")
+    args = ap.parse_args(argv)
+
+    if not DATA_ROOT.exists():
+        log(f"data root {DATA_ROOT} does not exist "
+            f"(set CATALYST_DATA_ROOT, or run this on the droplet)")
+        return 2
+
+    files = find_files()
+    if not files:
+        log(f"no CSV files under {DATA_ROOT}")
+        return 2
+
+    log(f"data root: {DATA_ROOT}")
+    log(f"{len(files)} CSV file(s), excluding the ohlcv/ cache\n")
+
+    profiles = []
+    for path in files:
+        try:
+            pr = profile_csv(path)
+        except OSError as e:
+            log(f"  {path.name}: unreadable — {e}")
+            continue
+        profiles.append(pr)
+        log(f"── {pr['file']}  ({pr['rows']} rows)")
+        for c in pr["columns"]:
+            extra = f"  range {c['range'][0]}..{c['range'][1]}" if "range" in c else ""
+            log(f"     {c['column']:<28} {c['kind']:<8} {c['evidence']}{extra}")
+        log()
+
+    verdict, where = ledger_verdict(profiles)
+    log("=" * 68)
+    if verdict == "FOUND":
+        log("PER-PICK LEDGER: candidate file(s) found —")
+        for w in where:
+            log(f"  {w}  (has both a ticker column and a date column)")
+        log("\nConfirm these really are per-pick records, not a coincidence of")
+        log("column types, then point backtest_mapping.json at the right one.")
+    else:
+        log("PER-PICK LEDGER: ABSENT.")
+        log("")
+        log("No file here carries both a ticker column and a date column, so")
+        log("there is no record of which ticker was picked on which day. Past")
+        log("picks cannot be reconstructed — convergence_alerts.csv is")
+        log("overwritten in place each run, so its history is already gone.")
+        log("")
+        log("A backtest can therefore only be built FORWARD from today:")
+        log("  1. run backtest.snapshot daily (archives the board + forecasts)")
+        log("  2. once ~60 trading days have accumulated, backtest.evaluate")
+        log("     joins them to the OHLCV cache and compares predictors")
+        log("")
+        log("Start step 1 now — every day it is not running is a day of")
+        log("evaluation data permanently lost.")
+    log("=" * 68)
+
+    if args.emit_mapping:
+        if MAPPING_FILE.exists():
+            log(f"\n{MAPPING_FILE} already exists — not overwriting it.")
+        else:
+            MAPPING_FILE.write_text(json.dumps(propose_mapping(profiles), indent=2))
+            log(f"\nwrote {MAPPING_FILE} — read and correct it before use")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

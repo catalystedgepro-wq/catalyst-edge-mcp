@@ -108,6 +108,21 @@ else
   note "- kronos_forecasts.csv: not present (pipeline not deployed)"
 fi
 
+# ── 3c. backtest snapshot coverage ───────────────────────────────────────────
+# A snapshot archiver that silently stopped costs evaluation days that cannot
+# be recovered, so surface it rather than letting it fail quietly.
+SNAP_DIR="${ROOT}/snapshots/convergence"
+if [[ -d "$SNAP_DIR" ]]; then
+  days="$(find "$SNAP_DIR" -name '*.csv' | wc -l | tr -d ' ')"
+  latest="$(find "$SNAP_DIR" -name '*.csv' -printf '%f\n' 2>/dev/null | sort | tail -1)"
+  note "- backtest snapshots: ${days} day(s), latest ${latest%.csv}"
+  if [[ -n "${latest:-}" ]] && [[ "${latest%.csv}" < "$(date -u -d '3 days ago' +%F)" ]]; then
+    fail "backtest snapshots stalled — newest is ${latest%.csv}"
+  fi
+else
+  note "- backtest snapshots: not started (see docs/OPERATIONS.md § Backtesting)"
+fi
+
 # ── 4. journal since the last run ────────────────────────────────────────────
 CURSOR="${STATE_DIR}/journal.cursor"
 if [[ -s "$CURSOR" ]]; then
