@@ -1,0 +1,13 @@
+# Offline scorer only. The MCP server itself stays stdlib-only — never install
+# these on the serving path.
+#
+# CPU-only torch: a plain `pip install torch` pulls ~5.5GB of CUDA libraries a
+# CPU droplet cannot use. Install with:
+#   pip install -r kronos_pipeline/requirements.txt \
+#       --extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.0.0
+numpy
+pandas
+einops
+safetensors
+huggingface_hub

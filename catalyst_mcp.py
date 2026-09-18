@@ -45,7 +45,7 @@ SERVER_NAME = "catalyst-edge"
 # Keep in lockstep with "version" in server.json — that is what the MCP
 # registry publishes and what clients see in initialize / GET /health.
 # smoke_test.py and scripts/publish-registry.sh both fail on a mismatch.
-SERVER_VERSION = "1.0.2"
+SERVER_VERSION = "1.1.0"
 
 _HERE = Path(__file__).resolve().parent
 # Data root: env override, else the workspace root (parent of mcp_server/).
@@ -224,6 +224,59 @@ def tool_get_thesis(args: dict, tier: str) -> dict:
             "thesis": thesis}
 
 
+def tool_get_price_forecast(args: dict, tier: str) -> dict:
+    """Kronos price forecast, precomputed by kronos_pipeline.score.
+
+    Reads a CSV like every other tool here — the model runs in the nightly
+    pipeline, never in the request path, so this stays stdlib-only and fast.
+    p_up is the fraction of sampled paths closing above the last actual close;
+    it is a probability, not a price target.
+    """
+    try:
+        rows = _read_csv("kronos_forecasts.csv")
+    except OSError as e:
+        raise ToolError(f"forecast data unavailable: {e}")
+
+    ticker = (args.get("ticker") or "").strip().upper()
+    if ticker:
+        rows = [r for r in rows if (r.get("ticker") or "").upper() == ticker]
+        if not rows:
+            raise ToolError(f"no Kronos forecast for '{ticker}' — it may be "
+                            f"outside today's scored universe")
+    rows.sort(key=lambda r: _num(r.get("p_up")), reverse=True)
+
+    try:
+        requested = int(args.get("limit")) if args.get("limit") is not None else 25
+    except (TypeError, ValueError):
+        requested = 25
+    limit = max(1, min(requested, 100))
+
+    forecasts = [{
+        "ticker": r.get("ticker"),
+        "as_of_bar": r.get("as_of_bar"),
+        "horizon_days": _num(r.get("horizon_days")),
+        "last_close": _num(r.get("last_close")),
+        "pred_close": _num(r.get("pred_close")),
+        "pred_return_pct": _num(r.get("pred_return_pct")),
+        "p_up": _num(r.get("p_up")),
+        "ret_p10_pct": _num(r.get("ret_p10_pct")),
+        "ret_p90_pct": _num(r.get("ret_p90_pct")),
+        "samples": _num(r.get("samples")),
+    } for r in rows[:limit]]
+
+    return {
+        "as_of": _mtime_iso("kronos_forecasts.csv"),
+        "model": rows[0].get("model") if rows else None,
+        "count": len(forecasts),
+        "forecasts": forecasts,
+        "note": ("p_up is the share of sampled Kronos paths closing above the "
+                 "last actual close over horizon_days; ret_p10_pct/ret_p90_pct "
+                 "bound the middle 80% of sampled returns. Statistical "
+                 "forecast from price history alone — it carries no filing or "
+                 "catalyst information and is not advice."),
+    }
+
+
 def tool_get_sector_lean(args: dict, tier: str) -> dict:
     try:
         rows = _read_csv("orphan_sector_lean.csv")
@@ -362,6 +415,25 @@ TOOLS = [
             "properties": {"ticker": {"type": "string",
                                       "description": "ticker symbol"}},
             "required": ["ticker"],
+        },
+    },
+    {
+        "name": "get_price_forecast",
+        "description": ("Kronos price forecast for a ticker (or the whole "
+                        "scored board), as a probability: p_up is the share "
+                        "of sampled price paths closing higher over the "
+                        "horizon, with a p10-p90 return band. Price history "
+                        "only — independent of the catalyst signal layers."),
+        "min_tier": "intelligence",
+        "handler": tool_get_price_forecast,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string",
+                           "description": "ticker symbol; omit for the full board"},
+                "limit": {"type": "integer",
+                          "description": "max rows when no ticker is given (default 25)"},
+            },
         },
     },
     {

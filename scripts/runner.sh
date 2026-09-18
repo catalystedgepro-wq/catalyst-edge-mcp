@@ -86,6 +86,28 @@ for f in convergence_alerts.csv orphan_sector_lean.csv sec_outcome_summary.csv \
   fi
 done
 
+# ── 3b. Kronos forecasts (optional — only once the pipeline is deployed) ─────
+if [[ -e "${ROOT}/kronos_forecasts.csv" ]]; then
+  age_h=$(( ( $(date +%s) - $(stat -c %Y "${ROOT}/kronos_forecasts.csv") ) / 3600 ))
+  if (( age_h > STALE_HOURS )); then
+    fail "stale snapshot: kronos_forecasts.csv is ${age_h}h old (threshold ${STALE_HOURS}h)"
+  else
+    note "- kronos_forecasts.csv: ${age_h}h old"
+  fi
+  # A nonzero repair count means Kronos emitted bars violating high/low ordering.
+  # Locate the column by header name — a positional index breaks silently
+  # if kronos_pipeline/score.py FIELDS ever changes.
+  repairs="$(awk -F, '
+    NR==1 { for (i=1; i<=NF; i++) if ($i == "invariant_repairs") c=i; next }
+    c     { s += $c }
+    END   { print s+0 }' "${ROOT}/kronos_forecasts.csv" 2>/dev/null || echo 0)"
+  if [[ "${repairs:-0}" != "0" ]]; then
+    note "- kronos: ${repairs} OHLC invariant repair(s) in the last run"
+  fi
+else
+  note "- kronos_forecasts.csv: not present (pipeline not deployed)"
+fi
+
 # ── 4. journal since the last run ────────────────────────────────────────────
 CURSOR="${STATE_DIR}/journal.cursor"
 if [[ -s "$CURSOR" ]]; then

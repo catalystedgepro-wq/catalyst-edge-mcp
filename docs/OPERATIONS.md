@@ -127,6 +127,73 @@ journal next to the service's own.
 
 `QUIET=1` means cron only mails you when a check fails.
 
+## Kronos forecast pipeline
+
+Two offline stages feed `get_price_forecast`. Both run in the nightly pipeline;
+neither is ever imported by the MCP server.
+
+```bash
+# 1. refresh the OHLCV cache (stdlib only — no torch needed)
+python3 -m kronos_pipeline.ohlcv --from-convergence
+
+# 2. score it (needs torch + a Kronos checkout)
+python3 -m kronos_pipeline.score --from-convergence --kronos-src /opt/kronos
+```
+
+Stage 1 writes `/opt/catalyst/ohlcv/<TICKER>.csv`, retaining 600 bars and
+re-pulling the last 5 sessions each run (exchanges restate volume after close).
+Stage 2 writes `/opt/catalyst/kronos_forecasts.csv`, which the MCP server reads
+with `_read_csv()` and dates from its mtime, exactly like every other snapshot.
+Both write atomically via a `.tmp` rename, so a reader never sees a half-file.
+
+### Setup, once
+
+```bash
+git clone https://github.com/shiyu-coder/Kronos /opt/kronos
+pip install -r /opt/catalyst/mcp_server/kronos_pipeline/requirements.txt \
+    --extra-index-url https://download.pytorch.org/whl/cpu
+```
+
+The CPU index is not optional on a droplet: a plain `pip install torch` pulls
+~5.5GB of CUDA libraries that a CPU-only box cannot use.
+
+Weights come from Hugging Face on first run (`NeoQuasar/Kronos-small` +
+`NeoQuasar/Kronos-Tokenizer-base`, ~25M params). If the host cannot reach
+huggingface.co, download them elsewhere and pass local directories to
+`--model` / `--tokenizer`.
+
+### Cost, and the knob that drives it
+
+`--samples` is the runtime lever. Kronos is generative, and
+`predict(sample_count=N)` averages the paths internally — throwing away the
+distribution. So the scorer passes the same window as N separate series to
+`predict_batch`, getting N independent paths in one batched pass, and reports
+`p_up` from their spread. Runtime scales linearly in `--samples` and in
+universe size. Start at `--samples 20` and measure before raising it.
+
+`Kronos-small` (25M) is the sane default on CPU. `Kronos-base` (102M) is 4x the
+compute for accuracy you have not yet shown you need — see the backtest note
+below.
+
+### Watch `invariant_repairs`
+
+Kronos samples OHLC from a discrete codebook with nothing enforcing
+`high >= max(open,close) >= min(open,close) >= low`, so a sampled bar can have
+its low above its high. `score.py` clamps these and counts them per ticker;
+`runner.sh` sums the column and reports it. A persistently nonzero count means
+the model is producing incoherent bars — worth investigating before trusting
+the forecasts, not something to leave running.
+
+### Not yet validated
+
+No backtest has established that these forecasts add alpha over the existing
+convergence score. `sec_outcome_summary.csv` is aggregated per list
+(`list_name, rows, wins, losses, hit_rate_*, avg_alpha_*`) with no per-pick
+rows, so there is nothing to join a forecast against. Until a per-pick outcome
+ledger exists, treat `get_price_forecast` as an independent signal on offer,
+not as a validated edge — and do not fine-tune against a baseline you cannot
+measure.
+
 ## Usage logging — the gap
 
 `get_convergence_picks` and `get_track_record` are open on the free tier, so

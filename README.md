@@ -32,6 +32,7 @@ Paid tiers use a Bearer token: `Authorization: Bearer <your-key>`.
 | `get_thesis` | intelligence | plain-language thesis (catalysts, risks, bear case) |
 | `get_sector_lean` | intelligence | directional sector lean |
 | `get_options_context` | intelligence | nearest expiration, ATM call/put and straddle cost (live, via Tradier) |
+| `get_price_forecast` | intelligence | Kronos price forecast as a probability — `p_up` plus a p10–p90 return band |
 
 **free** — evaluation tier, no key required. **intelligence** — all tools, full depth; keys via [catalystedgescanner.com/pricing](https://catalystedgescanner.com/pricing/) or catalystedgepro@gmail.com.
 
@@ -62,6 +63,26 @@ needs `mcp_keys.json` and the data snapshots the tools read, which are
 gitignored or live in the workspace root — so a bare clone of this repo cannot
 run it, and it will say which inputs are missing rather than crash. Run it
 where the data lives.
+
+## Kronos price forecasts
+
+`get_price_forecast` serves forecasts from [Kronos](https://github.com/shiyu-coder/Kronos)
+(MIT), a foundation model over OHLCV candlesticks. The model runs **offline**,
+in the nightly pipeline — never in the request path — so the server keeps its
+stdlib-only, millisecond-start property:
+
+```
+kronos_pipeline/ohlcv.py   Tradier /markets/history  ->  ohlcv/<TICKER>.csv
+kronos_pipeline/score.py   ohlcv/<TICKER>.csv        ->  kronos_forecasts.csv
+```
+
+The headline number is `p_up`: the share of sampled price paths closing above
+the last actual close over the horizon. It is a probability, so it composes
+with the convergence score — unlike a predicted price. It is derived from price
+history alone and carries no filing or catalyst information, which is what
+makes it worth combining rather than redundant.
+
+See [docs/OPERATIONS.md](docs/OPERATIONS.md#kronos-forecast-pipeline) to run it.
 
 ## Operations
 

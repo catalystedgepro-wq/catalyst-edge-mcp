@@ -31,6 +31,19 @@ REQUIRED = [
 ]
 
 
+# Every tool the server registers. Kept explicit so adding a tool without
+# updating the test is a failure, not a silent pass.
+EXPECTED_TOOLS = {
+    "get_convergence_picks", "get_ticker_signal", "get_thesis",
+    "get_price_forecast", "get_sector_lean", "get_options_context",
+    "get_track_record",
+}
+
+# Produced by kronos_pipeline.score. Optional: a droplet that has not deployed
+# the Kronos pipeline yet is not broken, so this is tested only when present.
+KRONOS_FORECASTS = ROOT / "kronos_forecasts.csv"
+
+
 def missing_inputs() -> list[str]:
     return [f"{p} — {what}" for p, what in REQUIRED if not p.exists()]
 
@@ -210,10 +223,14 @@ def main() -> int:
     else:
         print("  ok  initialize handshake")
     n_tools = len(resp.get(2, {}).get("result", {}).get("tools", []))
-    if n_tools != 6:
-        failures.append(f"tools/list: expected 6 tools, got {n_tools}")
+    if n_tools != len(EXPECTED_TOOLS):
+        failures.append(f"tools/list: expected {len(EXPECTED_TOOLS)} tools, got {n_tools}")
     else:
-        print("  ok  tools/list (6 tools)")
+        print(f"  ok  tools/list ({n_tools} tools)")
+    served = {t["name"] for t in resp.get(2, {}).get("result", {}).get("tools", [])}
+    if served != EXPECTED_TOOLS:
+        failures.append(f"tools/list: name drift — missing {EXPECTED_TOOLS - served}, "
+                        f"unexpected {served - EXPECTED_TOOLS}")
     for rid, label in [(3, "get_convergence_picks"), (4, "get_ticker_signal"),
                        (5, "get_thesis"), (6, "get_sector_lean"),
                        (7, "get_track_record")]:
@@ -222,6 +239,19 @@ def main() -> int:
             failures.append(f"{label}: error or empty -> {res}")
         else:
             print(f"  ok  {label}")
+
+    # get_price_forecast only works once the Kronos pipeline has run.
+    if KRONOS_FORECASTS.exists():
+        fc = run(ikey, [{"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                         "params": {"name": "get_price_forecast",
+                                    "arguments": {"limit": 3}}}])
+        res = fc[0].get("result", {}) if fc else {}
+        if res.get("isError") or not res.get("content"):
+            failures.append(f"get_price_forecast: error or empty -> {res}")
+        else:
+            print("  ok  get_price_forecast")
+    else:
+        print("  --  get_price_forecast skipped (no kronos_forecasts.csv yet)")
 
     # Free tier: an intelligence-only tool must be gated.
     gated = run("", [{"jsonrpc": "2.0", "id": 1, "method": "tools/call",
