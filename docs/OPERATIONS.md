@@ -1,0 +1,156 @@
+# Operations
+
+Runbook for the hosted Catalyst Edge MCP server. Every routine action is one
+command; the scripts live in [`scripts/`](../scripts).
+
+## Layout on the droplet
+
+```
+/opt/catalyst/                     DATA_ROOT — the tools read snapshots here
+├── convergence_alerts.csv         get_convergence_picks, get_ticker_signal
+├── orphan_sector_lean.csv         get_sector_lean
+├── sec_outcome_summary.csv        get_track_record
+├── docs/data/theses.json          get_thesis
+├── .env                           TRADIER_TOKEN (gitignored, never deployed)
+├── releases/<ts>/                 deploy snapshots, last 10 kept
+├── runner-reports/<date>.md       runner output
+└── mcp_server/                    this repo, deployed
+    ├── catalyst_mcp.py
+    ├── mcp_keys.json              key→tier map (gitignored, never deployed)
+    └── scripts/
+```
+
+The service binds `127.0.0.1:8848`; nginx terminates TLS and proxies
+`https://catalystedgescanner.com/mcp/` to it.
+
+## Deploy
+
+```bash
+./scripts/deploy.sh              # ship HEAD, restart, verify, auto-rollback
+DRY_RUN=1 ./scripts/deploy.sh    # show exactly what would be sent
+```
+
+Ships only git-tracked files at `HEAD`. `mcp_keys.json` and `.env` on the
+droplet are excluded from the tarball and never overwritten — clobbering the
+first would drop every customer API key. The release is byte-compiled before
+the restart, so a syntax error fails the deploy instead of taking the service
+down, and a failed post-restart health check restores the previous snapshot
+automatically.
+
+Rollback restores the files the previous release contained. A file *added* by
+the new release stays (harmless — nothing imports it); to remove it, deploy
+an older commit.
+
+## Logs
+
+```bash
+./scripts/pull-logs.sh                    # everything new since the last pull
+SINCE='2 hours ago' ./scripts/pull-logs.sh
+FOLLOW=1 ./scripts/pull-logs.sh           # live stream
+```
+
+Incremental pulls use a journald cursor in `logs/.cursor`, so repeated runs
+never duplicate lines. Output lands in `logs/` (gitignored).
+
+## Registry publish
+
+```bash
+CHECK_ONLY=1 ./scripts/publish-registry.sh   # preflight, publishes nothing
+./scripts/publish-registry.sh                # preflight, then publish
+```
+
+Runs on the droplet by default: the `com.catalystedgescanner/*` namespace is
+authenticated by proving control of `catalystedgescanner.com`, which the
+droplet serves. `LOCAL=1` runs the publisher on your machine instead.
+
+The preflight refuses to publish when:
+
+- `server.json` is malformed
+- `server.json`'s `version` disagrees with `SERVER_VERSION` in `catalyst_mcp.py`
+- that version is already in the registry (the registry rejects duplicates)
+- the `remotes[].url` in the listing does not answer `tools/list`
+
+**Bump both `server.json` and `SERVER_VERSION` together.** They are separately
+enforced by the preflight and by `smoke_test.py`.
+
+If your namespace was authenticated some way other than DNS, change
+`PUBLISH_LOGIN_CMD` at the top of the script — that is the only line that
+encodes the login method.
+
+## Scheduled runner
+
+[`scripts/runner.sh`](../scripts/runner.sh) checks unit state, the health
+endpoint, data-snapshot freshness, and new journal errors. It is read-only:
+it does not deploy, publish, restart anything, call an LLM, or make any
+outbound request. Exit 0 = green, exit 1 = a problem on stdout.
+
+**Run it on the droplet, not from a laptop over ssh.** Droplet-side it needs
+no ssh key, no permission grant, and keeps working when your laptop is shut.
+
+### systemd timer (preferred — the box already uses systemd)
+
+```bash
+cp /opt/catalyst/mcp_server/catalyst-runner.service /etc/systemd/system/
+cp /opt/catalyst/mcp_server/catalyst-runner.timer   /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now catalyst-runner.timer
+systemctl list-timers catalyst-runner.timer   # confirm the next firing
+```
+
+Check on it later:
+
+```bash
+journalctl -u catalyst-runner.service --since today
+cat /opt/catalyst/runner-reports/$(date -u +%F).md
+```
+
+Timer over cron because it inherits the unit's sandboxing, `Persistent=true`
+catches up a window missed across a reboot, and the output lands in the
+journal next to the service's own.
+
+### cron (alternative)
+
+`crontab -e` on the droplet, then:
+
+```cron
+*/30 * * * * QUIET=1 CATALYST_ROOT=/opt/catalyst /opt/catalyst/mcp_server/scripts/runner.sh >> /var/log/catalyst-runner.log 2>&1
+```
+
+`QUIET=1` means cron only mails you when a check fails.
+
+## Usage logging — the gap
+
+`get_convergence_picks` and `get_track_record` are open on the free tier, so
+anyone can call the server without a key. **Nothing about those calls is
+recorded.** `run_http()` sets `Handler.log_message` to a no-op, which
+suppresses the built-in access log, and no per-request line is emitted
+anywhere else. The journal holds startup lines and crashes only.
+
+So there is currently nothing to mine for leads: `pull-logs.sh` will pull a
+near-empty journal and `runner.sh` will report that usage cannot be measured.
+Fixing it means adding a deliberate request log to `run_http()`.
+
+If you add one, two things matter:
+
+- **Never log the Bearer token.** Log a short digest of it
+  (`hashlib.sha256(key).hexdigest()[:12]`) so you can count distinct callers
+  and correlate with `mcp_keys.json` without the journal becoming a file of
+  live credentials.
+- Decide what you retain about anonymous free-tier callers. IP + user-agent +
+  tool name is enough to spot an evaluating team; it is also personal data
+  with a retention question attached.
+
+That change is not in this commit — it is a product decision, not a fix.
+
+## ssh permissions in Claude Code
+
+The scripts do not make an ssh grant narrower. Allowing
+`Bash(./scripts/deploy.sh:*)` allows whatever that script does, and the script
+is editable — it is a *broader* grant than it looks, not a tighter one.
+
+What they do give you is one reviewable command per operation, with the
+preflight and rollback logic in version control where it can be read and
+diffed, instead of being improvised per session. Grant whatever ssh access you
+are comfortable granting, on its own merits.
+
+The scheduled runner needs no grant at all, because it runs on the droplet.

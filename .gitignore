@@ -1,3 +1,8 @@
 mcp_keys.json
 .env
 __pycache__/
+
+# ops scratch — pulled journals and runner output
+logs/
+runner-reports/
+.runner/

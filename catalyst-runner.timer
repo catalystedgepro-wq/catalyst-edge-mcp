@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the Catalyst Edge MCP check every 30 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+# Catch up after a reboot instead of silently skipping the missed window.
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

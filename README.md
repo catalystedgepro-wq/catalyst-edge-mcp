@@ -31,6 +31,7 @@ Paid tiers use a Bearer token: `Authorization: Bearer <your-key>`.
 | `get_ticker_signal` | intelligence | full per-ticker signal-layer breakdown |
 | `get_thesis` | intelligence | plain-language thesis (catalysts, risks, bear case) |
 | `get_sector_lean` | intelligence | directional sector lean |
+| `get_options_context` | intelligence | nearest expiration, ATM call/put and straddle cost (live, via Tradier) |
 
 **free** — evaluation tier, no key required. **intelligence** — all tools, full depth; keys via [catalystedgescanner.com/pricing](https://catalystedgescanner.com/pricing/) or catalystedgepro@gmail.com.
 
@@ -55,6 +56,21 @@ Stdlib Python only — no dependencies. HTTP mode: `CATALYST_MCP_HTTP=1 python3 
 ```bash
 python3 smoke_test.py   # exit 0 = handshake + all tools OK
 ```
+
+The smoke test drives both transports, every tool, and free-tier gating. It
+needs `mcp_keys.json` and the data snapshots the tools read, which are
+gitignored or live in the workspace root — so a bare clone of this repo cannot
+run it, and it will say which inputs are missing rather than crash. Run it
+where the data lives.
+
+## Operations
+
+Deploying, log pulls, registry publishing and the scheduled health check are
+one command each — see [docs/OPERATIONS.md](docs/OPERATIONS.md) and
+[`scripts/`](scripts).
+
+`server.json`'s `version` and `SERVER_VERSION` in `catalyst_mcp.py` must stay
+in lockstep; the smoke test and the publish preflight both fail on a drift.
 
 ## Data & disclaimers
 

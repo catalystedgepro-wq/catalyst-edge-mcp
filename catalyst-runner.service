@@ -1,0 +1,17 @@
+[Unit]
+Description=Catalyst Edge MCP — unattended health / freshness / journal check
+Documentation=file:///opt/catalyst/mcp_server/docs/OPERATIONS.md
+After=network.target catalyst-mcp.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/catalyst/mcp_server
+Environment=CATALYST_ROOT=/opt/catalyst
+Environment=QUIET=1
+ExecStart=/opt/catalyst/mcp_server/scripts/runner.sh
+# The check is read-only; it never needs to write outside these two dirs.
+ReadWritePaths=/opt/catalyst/runner-reports /opt/catalyst/.runner
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
