@@ -19,6 +19,22 @@ SERVER = HERE / "catalyst_mcp.py"
 ROOT = HERE.parent
 
 
+# Everything the tools read. All are gitignored or live outside this repo, so
+# a fresh clone has none of them — check up front and say so, rather than
+# dying with a traceback partway through the run.
+REQUIRED = [
+    (HERE / "mcp_keys.json", "key→tier map (see mcp_keys.json.example)"),
+    (ROOT / "convergence_alerts.csv", "scored picks snapshot"),
+    (ROOT / "docs/data/theses.json", "per-ticker theses"),
+    (ROOT / "orphan_sector_lean.csv", "sector lean snapshot"),
+    (ROOT / "sec_outcome_summary.csv", "track-record outcomes"),
+]
+
+
+def missing_inputs() -> list[str]:
+    return [f"{p} — {what}" for p, what in REQUIRED if not p.exists()]
+
+
 def pick_ticker() -> str:
     """A ticker present in BOTH theses.json and convergence_alerts.csv —
     the two snapshots aren't always perfectly in sync."""
@@ -34,11 +50,37 @@ def pick_ticker() -> str:
 
 def intelligence_key() -> str:
     """An intelligence-tier key from mcp_keys.json — no key is hardcoded."""
-    keys = json.loads((HERE / "mcp_keys.json").read_text()).get("keys", {})
+    try:
+        raw = (HERE / "mcp_keys.json").read_text()
+    except OSError:
+        return ""
+    try:
+        keys = json.loads(raw).get("keys", {})
+    except json.JSONDecodeError:
+        return ""
     for k, tier in keys.items():
         if tier == "intelligence":
             return k
     return ""
+
+
+def check_version_sync() -> list[str]:
+    """server.json is what the registry publishes; SERVER_VERSION is what
+    clients see in initialize and GET /health. A drift between them ships a
+    listing that misdescribes the running server."""
+    import re
+    try:
+        declared = json.loads((HERE / "server.json").read_text())["version"]
+    except (OSError, json.JSONDecodeError, KeyError) as e:
+        return [f"server.json unreadable: {e}"]
+    m = re.search(r'^SERVER_VERSION\s*=\s*["\']([^"\']+)["\']',
+                  SERVER.read_text(), re.M)
+    if not m:
+        return ["could not find SERVER_VERSION in catalyst_mcp.py"]
+    if m.group(1) != declared:
+        return [f"version drift: server.json={declared} "
+                f"catalyst_mcp.py={m.group(1)}"]
+    return []
 
 
 def run(tier_key: str, messages: list[dict]) -> list[dict]:
@@ -124,9 +166,24 @@ def test_http(ikey: str) -> list[str]:
 
 
 def main() -> int:
+    gaps = missing_inputs()
+    if gaps:
+        print("FAIL: missing inputs this test needs:")
+        for g in gaps:
+            print(f"  - {g}")
+        print("\nThese are gitignored or live in the workspace root, so a bare\n"
+              "clone of this repo cannot run the smoke test. Run it on a host\n"
+              "with the data snapshots (e.g. the droplet at /opt/catalyst).")
+        return 1
+
+    failures = check_version_sync()
+    for f in failures:
+        print(f"  !!  {f}")
+    if not failures:
+        print("  ok  server.json / SERVER_VERSION in sync")
+
     tk = pick_ticker()
     ikey = intelligence_key()
-    failures = []
     if not ikey:
         print("FAIL: no intelligence-tier key in mcp_keys.json")
         return 1

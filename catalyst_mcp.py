@@ -42,7 +42,10 @@ from pathlib import Path
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "catalyst-edge"
-SERVER_VERSION = "1.0.0"
+# Keep in lockstep with "version" in server.json — that is what the MCP
+# registry publishes and what clients see in initialize / GET /health.
+# smoke_test.py and scripts/publish-registry.sh both fail on a mismatch.
+SERVER_VERSION = "1.0.2"
 
 _HERE = Path(__file__).resolve().parent
 # Data root: env override, else the workspace root (parent of mcp_server/).
