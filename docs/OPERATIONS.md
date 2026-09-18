@@ -37,6 +37,15 @@ the restart, so a syntax error fails the deploy instead of taking the service
 down, and a failed post-restart health check restores the previous snapshot
 automatically.
 
+Before changing `deploy.sh`, run its test — it exercises the droplet-side
+block against a sandbox with stubbed `systemctl`/`curl`, so the paths that
+could lose customer keys or leave a broken release running are covered
+without touching production:
+
+```bash
+./scripts/test-deploy-logic.sh
+```
+
 Rollback restores the files the previous release contained. A file *added* by
 the new release stays (harmless — nothing imports it); to remove it, deploy
 an older commit.
