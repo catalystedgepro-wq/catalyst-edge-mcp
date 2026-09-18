@@ -213,6 +213,95 @@ def assess(rows: list[dict], predictor: str) -> dict | None:
     }
 
 
+def assess_incremental(rows: list[dict], base: str = "convergence_score",
+                       overlay: str = "kronos_p_up", top_frac: float = 0.2,
+                       strata: int = 4) -> dict | None:
+    """Does the overlay add anything ON TOP of the base predictor?
+
+    Comparing two predictors side by side cannot answer this. If Kronos merely
+    re-derives what the convergence score already captures, both look good
+    separately and the overlay is worth nothing.
+
+    The naive version — take the base's top slice, split it by the overlay —
+    has a trap. If the overlay is any monotone function of the base, that
+    split is just the base splitting itself, and the base predicts returns, so
+    the overlay gets credited for the base's work.
+
+    So the comparison is STRATIFIED: the top slice is cut into bands of
+    similar base score, the overlay split happens inside each band, and the
+    per-band deltas are pooled. Within a narrow band the base is near-constant,
+    so anything the overlay separates there is information the base does not
+    carry. An overlay that is a function of the base has no independent
+    variation inside a band and correctly scores zero.
+
+    Significance is Welch's t on the pooled delta — a raw percentage gap means
+    nothing without the noise it sits in.
+    """
+    usable = [r for r in rows
+              if r.get(base) not in ("", None) and r.get(overlay) not in ("", None)]
+    if len(usable) < 80:
+        return None
+
+    usable.sort(key=lambda r: float(r[base]), reverse=True)
+    n_top = max(40, int(len(usable) * top_frac))
+    top = usable[:n_top]
+
+    def moments(chunk):
+        rets = [float(r["fwd_return_pct"]) for r in chunk]
+        n = len(rets)
+        mean = sum(rets) / n
+        var = sum((x - mean) ** 2 for x in rets) / (n - 1) if n > 1 else 0.0
+        return n, mean, var
+
+    band_size = max(20, len(top) // strata)
+    lo_all, hi_all, num, var_sum, bands = [], [], 0.0, 0.0, 0
+
+    for i in range(0, len(top), band_size):
+        band = top[i:i + band_size]
+        if len(band) < 20:            # a remainder too small to split
+            break
+        band = sorted(band, key=lambda r: float(r[overlay]))
+        half = len(band) // 2
+        lo, hi = band[:half], band[half:]
+        n_lo, m_lo, v_lo = moments(lo)
+        n_hi, m_hi, v_hi = moments(hi)
+        w = len(band)
+        num += (m_hi - m_lo) * w
+        var_sum += (v_lo / n_lo + v_hi / n_hi) * w * w
+        bands += w
+        lo_all += lo
+        hi_all += hi
+
+    if not bands:
+        return None
+    delta = num / bands
+    se = math.sqrt(var_sum) / bands
+    t = delta / se if se > 0 else 0.0
+
+    def summarise(chunk):
+        n, mean, _ = moments(chunk)
+        rets = [float(r["fwd_return_pct"]) for r in chunk]
+        return {"n": n, "mean_return_pct": round(mean, 4),
+                "hit_rate": round(sum(1 for x in rets if x > 0) / n, 4)}
+
+    if abs(t) < 2.0:
+        verdict = ("no separation beyond noise — the overlay adds nothing the "
+                   "base does not already capture")
+    elif t > 0:
+        verdict = "overlay separates within bands of equal base score"
+    else:
+        verdict = "overlay separates INVERSELY — high overlay does worse"
+
+    return {
+        "base": base, "overlay": overlay,
+        "base_top_slice": {"frac": top_frac, "n": len(top), "strata": bands // band_size},
+        "overlay_low": summarise(lo_all), "overlay_high": summarise(hi_all),
+        "incremental_pct": round(delta, 4),
+        "t_stat": round(t, 3),
+        "verdict": verdict,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -246,6 +335,7 @@ def main(argv: list[str] | None = None) -> int:
         "predictors": [a for a in (assess(rows, "convergence_score"),
                                    assess(rows, "kronos_p_up"),
                                    assess(rows, "kronos_pred_return_pct")) if a],
+        "incremental": assess_incremental(rows),
     }
 
     if args.json:
@@ -263,6 +353,22 @@ def main(argv: list[str] | None = None) -> int:
                     f"hit={b['hit_rate']:.0%}")
             if a["top_minus_bottom_pct"] is not None:
                 log(f"     top-bottom spread: {a['top_minus_bottom_pct']:+.3f}%")
+            log()
+
+        inc = report.get("incremental")
+        if inc:
+            log(f"── does {inc['overlay']} add anything on top of {inc['base']}?")
+            log(f"     within the top {inc['base_top_slice']['frac']:.0%} by "
+                f"{inc['base']} (n={inc['base_top_slice']['n']}):")
+            log(f"       low  {inc['overlay']}: n={inc['overlay_low']['n']:<5} "
+                f"mean={inc['overlay_low']['mean_return_pct']:+7.3f}%  "
+                f"hit={inc['overlay_low']['hit_rate']:.0%}")
+            log(f"       high {inc['overlay']}: n={inc['overlay_high']['n']:<5} "
+                f"mean={inc['overlay_high']['mean_return_pct']:+7.3f}%  "
+                f"hit={inc['overlay_high']['hit_rate']:.0%}")
+            log(f"     incremental: {inc['incremental_pct']:+.3f}% "
+                f"(t={inc['t_stat']:+.2f})")
+            log(f"     -> {inc['verdict']}")
             log()
 
     if len(rows) < MIN_PICKS or days < 20:

@@ -90,6 +90,48 @@ def build_fixture(root: Path) -> int:
     return n
 
 
+def test_incremental() -> None:
+    """The overlay must be credited only for information the base lacks.
+
+    Four synthetic overlays over a base that sees latent driver `a`:
+      noise      independent of everything      -> reject
+      duplicate  a pure function of the base    -> reject (the trap: an
+                 unstratified split would credit the base's own skill here)
+      2nd_look   an independent noisy re-read of `a` -> weak credit; a second
+                 measurement genuinely sharpens the estimate
+      additive   sees a second driver `b`       -> strong credit
+    """
+    print("incremental analysis")
+    import random as _r
+    from backtest.evaluate import assess_incremental
+    _r.seed(5)
+
+    def build(mode, n=2000):
+        rows = []
+        for _ in range(n):
+            a, b = _r.gauss(0, 1), _r.gauss(0, 1)
+            fwd = 2.0 * a + 2.0 * b + _r.gauss(0, 1.5)
+            conv = 50 + a * 10 + _r.gauss(0, 2)
+            overlay = {"noise": _r.random(),
+                       "duplicate": conv * 3.0 - 7.0,
+                       "2nd_look": conv + _r.gauss(0, 3),
+                       "additive": b + _r.gauss(0, .15)}[mode]
+            rows.append({"convergence_score": conv, "kronos_p_up": overlay,
+                         "fwd_return_pct": fwd})
+        return rows
+
+    res = {m: assess_incremental(build(m))
+           for m in ("noise", "duplicate", "2nd_look", "additive")}
+    for m, r in res.items():
+        print(f"    {m:10} incr={r['incremental_pct']:+7.3f}%  t={r['t_stat']:+6.2f}")
+    check(abs(res["noise"]["t_stat"]) < 2, "rejects a pure-noise overlay")
+    check(abs(res["duplicate"]["t_stat"]) < 2,
+          "rejects an overlay that is a function of the base")
+    check(res["additive"]["t_stat"] > 2, "credits an overlay with a new driver")
+    check(res["additive"]["t_stat"] > res["2nd_look"]["t_stat"],
+          "ranks new information above a re-measurement")
+
+
 def main() -> int:
     root = Path(tempfile.mkdtemp())
     planted = build_fixture(root)
@@ -134,6 +176,8 @@ def main() -> int:
                         env=dict(os.environ, CATALYST_DATA_ROOT=str(empty)))
     check(r2.returncode == 1 and "run backtest.snapshot" in r2.stdout,
           "empty data root gives guidance, not a traceback")
+
+    test_incremental()
 
     if FAILURES:
         print(f"\n{len(FAILURES)} FAILED")
