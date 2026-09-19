@@ -1,0 +1,20 @@
+[Unit]
+Description=Collect Numerai's scoring of our submissions
+Documentation=file:///opt/catalyst/mcp_server/docs/OPERATIONS.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/catalyst/mcp_server
+Environment=CATALYST_DATA_ROOT=/opt/catalyst
+# Set your model names here, comma separated.
+Environment=NUMERAI_MODELS=REPLACE_WITH_YOUR_MODEL
+ExecStart=/usr/bin/python3 -m numerai_pipeline.collect
+# Deliberately NOT wrapped in `|| true`: a silent failure here loses a round
+# permanently, and the whole reason this exists is that failures went unseen.
+ReadWritePaths=/opt/catalyst/numerai
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes

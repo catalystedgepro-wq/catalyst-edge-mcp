@@ -123,6 +123,24 @@ else
   note "- backtest snapshots: not started (see docs/OPERATIONS.md § Backtesting)"
 fi
 
+# ── 3d. Numerai score collection ─────────────────────────────────────────────
+# Six months of scoring accumulated unread because nothing watched it. Watch it.
+NUM_CSV="${ROOT}/numerai/rounds.csv"
+if [[ -f "$NUM_CSV" ]]; then
+  scored="$(awk -F, 'NR==1{for(i=1;i<=NF;i++) if($i=="corr") c=i; next} c && $c!="" {n++} END{print n+0}' "$NUM_CSV")"
+  age_h=$(( ( $(date +%s) - $(stat -c %Y "$NUM_CSV") ) / 3600 ))
+  note "- numerai rounds.csv: ${scored} scored rounds, refreshed ${age_h}h ago"
+  if (( age_h > 48 )); then
+    fail "numerai collection stalled — rounds.csv is ${age_h}h old"
+  fi
+  if [[ -f "${ROOT}/numerai/status.json" ]] \
+     && grep -q '"failed": \[[^]]' "${ROOT}/numerai/status.json"; then
+    fail "numerai collection reported a failed model (see numerai/status.json)"
+  fi
+else
+  note "- numerai rounds.csv: not present (collector not deployed)"
+fi
+
 # ── 4. journal since the last run ────────────────────────────────────────────
 CURSOR="${STATE_DIR}/journal.cursor"
 if [[ -s "$CURSOR" ]]; then

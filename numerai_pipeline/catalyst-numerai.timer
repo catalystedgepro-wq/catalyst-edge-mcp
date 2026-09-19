@@ -1,0 +1,12 @@
+[Unit]
+Description=Collect Numerai scores daily
+
+[Timer]
+# Rounds resolve on their own schedule; a daily pull always fetches the full
+# history and upserts, so nothing is lost if a day is missed.
+OnCalendar=daily
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

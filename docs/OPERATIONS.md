@@ -450,18 +450,19 @@ out-of-sample Kronos evaluation gets built. A retrospective backfill is faster
 but a pretrained forecaster may have seen the period in training, which
 flatters it.
 
-## Numerai: six months of independent scoring you have not collected
+## Numerai: collect the scoring, permanently
 
 `build_numerai_signals.py` submits the **percentile rank of
-convergence_score** (plus a ±0.10 DCF grade tilt) to Numerai Signals, weekly.
-Numerai has therefore been grading that exact score — out-of-sample, on
-20-day forward returns, neutralised against its own risk factors, by a party
-with no reason to flatter it — since at least round 1253 (2026-04-30).
+convergence_score** (plus a ±0.10 DCF tilt) to Numerai Signals, weekly.
+Numerai has been grading that exact score since at least round 1253
+(2026-04-30) — out-of-sample, on 20-day forward returns, neutralised against
+its own risk factors, by a party with no reason to flatter it.
 
-Nothing in this stack has ever pulled those scores back. `submit_numerai.py`
-records that a submission was accepted; no file anywhere records how it did.
+None of it was ever collected. `submit_numerai.py` writes a receipt saying a
+submission was accepted; no file anywhere recorded how it scored. That is six
+months of the best evidence in this project, lost by default.
 
-It is a far better referee than any internal backtest:
+It is a better referee than any internal backtest:
 
 | | internal ledger | Numerai |
 |---|---|---|
@@ -470,34 +471,72 @@ It is a far better referee than any internal backtest:
 | returns | raw, self-computed | neutralised against their factors |
 | scored by | our own join logic | them |
 
+### Deploy it once
+
 ```bash
-python3 -m backtest.numerai_scores --model YOUR_MODEL --save rounds.json
-python3 -m backtest.numerai_scores --from-json rounds.json   # if the API path fails
+# on the box that already submits — the API must be reachable from there
+sudo cp numerai_pipeline/catalyst-numerai.{service,timer} /etc/systemd/system/
+sudo sed -i 's/REPLACE_WITH_YOUR_MODEL/<your model name>/' \
+    /etc/systemd/system/catalyst-numerai.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now catalyst-numerai.timer
+sudo systemctl start catalyst-numerai.service     # backfill everything now
+python3 -m numerai_pipeline.collect --status-only  # confirm
 ```
 
-### Write down the prediction before you run it
+Every run fetches the **full** round history and upserts into
+`/opt/catalyst/numerai/rounds.csv`. A missed day heals itself. A round that
+resolves later is updated in place. `pip install numerapi` is optional but
+recommended — it tracks Numerai's schema changes.
 
-The internal ledger says `convergence_score` is anti-predictive — its top
-decile is 70% short/RegSHO names that underperform, and zeroing that weight
-improves every column. The Numerai submission ranks **bullish** by that same
-score. So mean correlation should come back at or below zero.
+If you would rather run it in the existing GitHub Actions pipeline, add it
+after the submit step — **without** the `|| echo` the other steps use:
 
-- **Negative and consistent** → the internal finding confirmed on six times
-  the data with better methodology, and the fix is a sign flip:
-  `load_convergence_rank()` sorts ascending so rank 0 is most bearish;
-  reversing it is one line. A signal that is reliably wrong is worth exactly
-  what one that is reliably right is worth.
-- **Indistinguishable from zero** → consistent with the ledger's "no
-  separation at any horizon", and the score needs rebuilding rather than
-  reversing.
-- **Reliably positive** → the internal finding is wrong, or specific to the
-  next-day horizon. Numerai scores 20 days out on a different universe after
-  neutralisation; a score that is bad for next-day moves can be good over a
-  month. That disagreement is worth more than either result alone — but do
-  not act on either until you know which horizon you are trading.
+```yaml
+- name: Collect Numerai scores
+  env:
+    NUMERAI_MODELS: <your model name>
+    CATALYST_DATA_ROOT: ${{ github.workspace }}
+  run: python3 -m numerai_pipeline.collect
+```
 
-The tool prints whichever of these applies and will not soften a result
-because it is unwelcome.
+### Three rules it enforces
+
+**Never lose history.** The CSV is read, merged and written through a temp
+file and an atomic rename. A failed fetch leaves the previous file untouched
+and exits 1 — it never truncates. One model failing does not touch another's
+rows.
+
+**Never silently succeed.** Every social step in the existing daily pipeline
+is `python3 x.py || echo "x failed"`, which is exactly how six months went
+unnoticed. This exits non-zero, writes the reason to `numerai/status.json`,
+and `runner.sh` fails when the file is more than 48h old or when status.json
+names a failed model. Do not wrap it in `|| echo`.
+
+**Never assume a schema.** Numerai has renamed the Signals correlation field
+repeatedly (`corr20`, `corr20V2`, `corrV4`, …). The field actually read is
+stored in every row as `corr_metric`, and an unrecognised field yields blank
+rather than a fabricated `0.0`, so a rename appears in the data instead of
+quietly becoming a flat line of zeros.
+
+### Then read it
+
+```bash
+python3 -m backtest.numerai_scores --from-json <(python3 - <<'EOF'
+import csv, json; print(json.dumps([dict(r) for r in csv.DictReader(open("/opt/catalyst/numerai/rounds.csv"))]))
+EOF
+)
+```
+
+The prediction to write down first: the internal ledger found
+`convergence_score` anti-predictive, and the submission ranks **bullish** by
+it, so mean correlation should come back at or below zero. Negative and
+consistent confirms the finding on six times the data and the fix is a
+one-line sign flip in `load_convergence_rank()`. Indistinguishable from zero
+matches "no separation at any horizon". Reliably positive contradicts the
+ledger — and since Numerai scores 20 days out after neutralisation while the
+ledger measures raw next-day moves, that disagreement would be worth more
+than either result alone.
 
 ## Usage logging — the gap
 
