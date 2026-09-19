@@ -66,6 +66,29 @@ python3 patches/fix_published_summary.py \
 
 It prints a before/after table and only writes with `--write`.
 
+## One command
+
+```bash
+./scripts/repair-published-alpha.sh            # dry run, changes nothing
+./scripts/repair-published-alpha.sh --write    # apply it
+```
+
+Four steps with real ordering dependencies — fetch adjusted prices for the
+affected tickers, repair the ledger, recompute the summary, audit — run in
+order, stopping on the first failure. No step is wrapped in `|| true`: a
+half-applied repair would leave the summary claiming a correction the ledger
+does not support, which is worse than not starting.
+
+It only fetches the 19 tickers with a move over 100%, not the whole board, so
+it is a handful of API calls rather than hundreds. Dry run prints the whole
+before/after and touches nothing.
+
+Preflight refuses to start without a Tradier token or the ledger repo, and
+says which is missing.
+
+Then the two patches below, which touch the scanner repo and have to be
+applied by hand.
+
 ## The root cause, and the actual repair
 
 The price floor above is a guard. `backtest/split_repair.py` is the repair.
