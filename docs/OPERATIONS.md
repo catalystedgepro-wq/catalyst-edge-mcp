@@ -200,79 +200,65 @@ ledger exists, treat `get_price_forecast` as an independent signal on offer,
 not as a validated edge — and do not fine-tune against a baseline you cannot
 measure.
 
-## Backtesting — and why it can only start now
+## Backtesting
 
-The question "does Kronos add alpha over the convergence score" needs a
-per-pick outcome record: which ticker was picked on which day, and what it
-then did. **Catalyst Edge has never kept one.** `sec_outcome_summary.csv` is
-aggregated per list (`list_name, rows, wins, losses, hit_rate_*, avg_alpha_*`)
-with no per-pick rows, and `convergence_alerts.csv` is overwritten in place on
-every run — so each day's board is destroyed by the next.
-
-Confirm this on your own droplet rather than taking it on faith:
+A per-pick outcome ledger already exists, in
+[catalystedgepro-wq/sec-catalyst-data](https://github.com/catalystedgepro-wq/sec-catalyst-data):
+`snapshots/<date>/outcomes.csv`, cumulative, ~28.7k picks over 42 pick dates
+with `alpha_close_pct` already SPY-adjusted and execution cost modelled. No
+waiting is required — the backtest runs today.
 
 ```bash
-python3 -m backtest.inspect_data
+git clone https://github.com/catalystedgepro-wq/sec-catalyst-data ../sec-catalyst-data
+
+# the score carried inside the ledger
+python3 -m backtest.evaluate --data-repo ../sec-catalyst-data
+
+# a predictor held in dated files beside it
+python3 -m backtest.evaluate --data-repo ../sec-catalyst-data \
+    --join-predictor convergence_score
+
+# does one add anything on top of the other
+python3 -m backtest.evaluate --data-repo ../sec-catalyst-data \
+    --incremental base_score convergence_score
 ```
 
-It inventories every CSV under the data root, reports real headers, row
-counts, value samples and date ranges, and states whether any file carries
-both a ticker column and a date column. It assumes no schema — `--emit-mapping`
-writes a stub with each guess and the evidence behind it, for you to correct.
+Any predictor joins the ledger on `(list_date, ticker)`, so Kronos forecasts
+are evaluated the same way once `kronos_forecasts.csv` snapshots accumulate —
+or once they are backfilled, since Kronos needs only price history up to each
+pick date.
 
-### Start the clock
+### Three things the evaluator refuses to do quietly
 
-Past picks are unrecoverable. Evaluation data can only accumulate forward, so
-this wants to be running today:
+**It does not pool lists.** `base_score` spans 15..27 on `sec_clean_gappers`
+and -11..27 on `sec_top_gappers`. A pooled rank correlation across
+incompatible scales measures the mix of lists, not the score. Per-list is the
+default; `--pooled` prints a warning beside the number.
 
-```bash
-python3 -m backtest.snapshot          # after the scoring pipeline, daily
-python3 -m backtest.snapshot --status # how many days have accumulated
-```
+**It reports list nesting.** `sec_top_gappers` (13,760 picks) *is* the
+universe — its pick set equals the union of all six lists, and every other
+list is a nested subset. Six lists are one universe plus five filtered views,
+so per-list results re-examine largely the same picks.
 
-It archives `convergence_alerts.csv`, `kronos_forecasts.csv` and
-`orphan_sector_lean.csv` into `snapshots/<kind>/<YYYY-MM-DD>.csv`, keyed by
-each source file's **mtime date**, not today's — a pipeline finishing at 23:50
-and a snapshot at 00:05 still agree on which day the picks belong to. It is
-idempotent and never overwrites without `--force`.
+**It counts hypothesis tests.** Every quintile spread is one test. The run
+prints how many were made and how many chance alone would be expected to
+produce, because 2 hits at |t| >= 2 across 20 tests is noise, not a finding.
 
-### Evaluate, once there is enough
+### Horizons
 
-```bash
-python3 -m backtest.evaluate --horizon 5
-```
+Every outcome column in the ledger is **next-day**. The horizon axis is
+therefore the exit rule inside day one — `gap_next_open_pct`,
+`alpha_close_pct`, `next_day_vwap_pct`, `realistic_pnl_net_pct` (a +2%/-1.5%
+bracket net of cost) — not a multi-day hold. Multi-day holds would need price
+history the ledger does not carry.
 
-Joins the snapshots to the OHLCV cache, writes `backtest_ledger.csv` (the
-per-pick record that never existed), and ranks each predictor by quantile
-bucket plus Spearman correlation against realized forward return.
+### Forward accumulation still matters
 
-**Entry timing matters more than the statistics.** Picks are ranked before the
-open from data through the prior close, so entry is the pick date's OPEN and
-exit is the close `--horizon` sessions later. Using the pick date's close as
-entry would let a pick see the move it is being judged on — an easy way to
-manufacture an edge that does not exist. If your pipeline actually publishes
-intraday, `--entry close` is the honest setting and the default is wrong for
-you.
-
-`--horizon 5` is a choice, not a default worth trusting. Run 1, 5 and 20 and
-see whether any apparent edge survives; one that appears at a single horizon
-usually is not one.
-
-### Do not read it too early
-
-Below ~200 picks over 20+ days the tool prints a warning and you should
-believe it. Bucket means at small n are dominated by noise, and a few percent
-of spread is not evidence. `backtest/test_backtest.py` plants a known signal
-in one predictor and pure noise in another and requires the evaluator to find
-the first and reject the second — that is what keeps it from reporting edge
-where there is none, but it cannot save you from reading 30 picks as a result.
-
-### Only then, fine-tuning
-
-Fine-tuning Kronos is the last step, not the next one. It needs a GPU the
-droplet does not have, and until the backtest shows the base model
-contributing something, there is no baseline to improve on and no way to tell
-whether a fine-tune helped.
+`backtest.snapshot` remains worth running nightly: the published ledger has no
+Kronos column, so forward snapshots of `kronos_forecasts.csv` are how a clean,
+out-of-sample Kronos evaluation gets built. A retrospective backfill is faster
+but a pretrained forecaster may have seen the period in training, which
+flatters it.
 
 ## Usage logging — the gap
 

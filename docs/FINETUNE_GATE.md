@@ -4,34 +4,42 @@ Whether to fine-tune Kronos on the Catalyst Edge universe. Written down in
 advance, because a criterion invented after seeing the numbers is not a
 criterion.
 
-**Target date: 2026-12-14** — 60 trading days from 2026-09-18, assuming
-`backtest.snapshot` starts running immediately. Every day it does not run
-pushes this out one day; the clock measures snapshots, not calendar time.
+**The December 2026 target date is superseded.** It assumed no per-pick
+outcome record existed and that evaluation data had to accumulate forward.
+That was wrong: `catalystedgepro-wq/sec-catalyst-data` carries ~28.7k scored
+picks with realized outcomes over 42 pick dates. Steps 1-3 below run today.
 
-## Step 0 — is the clock even running
+## Step 0 — run the baseline first
 
 ```bash
-python3 -m backtest.snapshot --status
+git clone https://github.com/catalystedgepro-wq/sec-catalyst-data ../sec-catalyst-data
+python3 -m backtest.evaluate --data-repo ../sec-catalyst-data
+python3 -m backtest.evaluate --data-repo ../sec-catalyst-data \
+    --join-predictor convergence_score
 ```
 
-If `convergence.days` is 0 or has not grown since the last check, **nothing
-below applies** and the only action is to fix the archiver. Past picks cannot
-be reconstructed, so a stalled archiver is not a delay, it is permanent data
-loss. `runner.sh` fails when the newest snapshot is more than 3 days old.
+As of 2026-09-18 neither `base_score` nor `convergence_score` separates
+outcomes on any list or any exit rule: every |rho| < 0.11, and the two
+quintile spreads reaching |t| >= 2 are exactly what 20 tests produce by
+chance. **This matters more than anything about Kronos.** If the existing
+score has no measurable edge, then "does Kronos add alpha over it" is the
+wrong question — there is no established baseline to add to, and a Kronos
+signal would be the whole edge rather than an increment.
+
+Re-run this before anything below. If the baseline is genuinely flat, decide
+whether to fix the existing score first; fine-tuning a second model to overlay
+on a flat one is an expensive way to avoid that question.
 
 ## Step 1 — enough data
 
-```bash
-python3 -m backtest.evaluate --horizon 5
-```
+Already satisfied for the existing scores (28,667 picks, 42 dates). For
+Kronos it is not: the ledger has no Kronos column. Either
+- accumulate `kronos_forecasts.csv` snapshots forward (clean, slow), or
+- backfill by scoring each historical pick date from price history up to that
+  date (fast, but a pretrained forecaster may have seen the period in
+  training, which flatters it).
 
-Required before reading anything else:
-
-- **≥ 200 picks** and **≥ 20 distinct pick dates**
-
-Below this the evaluator prints a warning and it should be believed. Bucket
-means at small n are dominated by noise; a spread of a few percent is not
-evidence of anything.
+Do the backfill for a fast read and the forward test to confirm it.
 
 ## Step 2 — does the base model show any signal at all
 
