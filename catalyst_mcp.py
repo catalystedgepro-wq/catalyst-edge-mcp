@@ -45,7 +45,7 @@ SERVER_NAME = "catalyst-edge"
 # Keep in lockstep with "version" in server.json — that is what the MCP
 # registry publishes and what clients see in initialize / GET /health.
 # smoke_test.py and scripts/publish-registry.sh both fail on a mismatch.
-SERVER_VERSION = "1.1.0"
+SERVER_VERSION = "1.2.0"
 
 _HERE = Path(__file__).resolve().parent
 # Data root: env override, else the workspace root (parent of mcp_server/).
@@ -308,7 +308,22 @@ def tool_get_track_record(args: dict, tier: str) -> dict:
         "losses": r.get("losses"),
         "hit_rate_2pct": _num(r.get("hit_rate_2pct")),
         "hit_rate_5pct": _num(r.get("hit_rate_5pct")),
-        "avg_alpha_close_pct": _num(r.get("avg_alpha_close_pct")),
+        # avg_alpha_close_pct is the raw mean over every row, including
+        # unadjusted reverse splits that fabricate returns up to +9900%.
+        # 19 rows out of 13,760 move it from -0.15% to +1.60%. Serve the
+        # investable figure as the headline when the summary carries it,
+        # and keep the raw one alongside rather than silently swapping it,
+        # so a caller comparing against an older response can see which is
+        # which. Older summaries predate the column; those fall back.
+        "avg_alpha_close_pct": _num(
+            r.get("avg_alpha_close_pct_investable")
+            or r.get("avg_alpha_close_pct")),
+        "avg_alpha_close_pct_raw": _num(r.get("avg_alpha_close_pct")),
+        "alpha_basis": ("investable"
+                        if r.get("avg_alpha_close_pct_investable")
+                        else "raw-unfiltered"),
+        "investable_rows": _num(r.get("investable_rows")),
+        "excluded_rows": _num(r.get("excluded_rows")),
         "avg_realistic_pnl_net_pct": _num(r.get("avg_realistic_pnl_net_pct")),
         "cohort_90d_hit_rate_2pct": _num(r.get("cohort_90d_hit_rate_2pct")),
     } for r in rows]
