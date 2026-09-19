@@ -9,7 +9,70 @@ outcome record existed and that evaluation data had to accumulate forward.
 That was wrong: `catalystedgepro-wq/sec-catalyst-data` carries ~28.7k scored
 picks with realized outcomes over 42 pick dates. Steps 1-3 below run today.
 
+## RESULT — Numerai contradicts the internal ledger (2026-09-19)
+
+Run on the droplet against the live API, model `catalystedge`:
+
+```
+1,191 raw records · 76 scored rounds · metric corr20V2
+mean correlation  +0.00954
+t vs zero         +7.20
+positive rounds   57/76  (75%)
+```
+
+**Reliably positive.** The prediction recorded here — mean correlation at or
+below zero, following the internal ledger's finding that convergence_score is
+anti-predictive — was wrong. Inverting the signal, which that finding pointed
+towards, would have destroyed a working edge.
+
+### Correct the t before quoting it
+
+Signals scores a 20-day forward window and submissions are weekly, so
+consecutive rounds share roughly 15 of 20 days of return. The 76 observations
+are not independent and t=7.20 is inflated:
+
+| assumed overlap | effective n | corrected t |
+|---|---|---|
+| 2x | 38 | 5.09 |
+| 3x | 25 | 4.16 |
+| 4x (most conservative) | 19 | 3.60 |
+
+It clears t=2 under every correction, so the signal is real. Per-round Sharpe
+is 0.83; the naive annualisation of 6.0 is not credible, ~3.0 is closer.
+Sign consistency alone is decisive: 57/76 positive has probability 7.4e-06
+under a fair coin.
+
+### Reconciling the two results
+
+They are not actually in conflict. They measure different things:
+
+| | internal ledger | Numerai |
+|---|---|---|
+| horizon | next day | 20 days |
+| returns | raw | neutralised against risk factors |
+| universe | ~1,900 US tickers | Signals universe |
+| fat tails | dominate (one +3,770% name) | ranked, so bounded |
+
+The internal finding stands where it was measured: on **raw next-day** moves
+the score does not separate, and the short/RegSHO cohort it concentrates at
+the top genuinely underperforms. The Numerai result says that once returns
+are ranked and factor-neutralised over 20 days, what is left does carry
+signal. A score can be poor for next-day raw moves and good for medium-horizon
+residual returns — those are different questions, and the answer is different.
+
+### What this does NOT establish
+
+The submission is the percentile rank of convergence_score **plus a ±0.10 DCF
+grade tilt**. The +0.00954 validates that combination, not convergence_score
+alone. The DCF component could be carrying all of it.
+
+Isolating it is cheap and is the obvious next step: Numerai allows multiple
+models. Submit a second model with the rank only and no DCF tilt, run both for
+a quarter, and compare. Until that is done, do not attribute the edge to
+either component.
+
 ## Step 0 — run the baseline first
+
 
 ```bash
 git clone https://github.com/catalystedgepro-wq/sec-catalyst-data ../sec-catalyst-data

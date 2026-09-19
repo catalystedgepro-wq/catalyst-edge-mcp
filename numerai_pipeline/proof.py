@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import statistics as st
 import sys
 import urllib.request
@@ -64,6 +65,51 @@ def gql(query, variables):
         return json.loads(r.read())
 
 
+def _query_with_fallback(profile: str, model: str, fields: list[str],
+                         gql_fn) -> tuple[list, list[str], str]:
+    """Ask for every candidate field; drop the ones the schema rejects; retry.
+
+    GraphQL fails the WHOLE query if any single requested field is unknown, so
+    a list of candidate metric names cannot simply be concatenated — one stale
+    name blanks everything. Numerai's error names the offending field, so this
+    strips it and asks again until the query is accepted. That is why the
+    order of CORR_KEYS does not matter and a rename cannot silently zero a
+    column: whatever survives is what the schema actually has.
+    """
+    wanted = list(dict.fromkeys(fields))
+    dropped: list[str] = []
+    for _ in range(len(fields) + 2):
+        q = ("query($m: String!) { %s(modelName: $m) { roundModelPerformances "
+             "{ roundNumber roundResolved roundOpenTime %s } } }"
+             % (profile, " ".join(wanted)))
+        try:
+            d = gql_fn(q, {"m": model})
+        except Exception as e:  # noqa: BLE001
+            return [], dropped, f"{type(e).__name__}: {e}"
+        errs = d.get("errors") or []
+        if errs:
+            msg = errs[0].get("message", "")
+            bad = re.findall(r"Cannot query field [\"']([^\"']+)[\"']", msg)
+            bad += re.findall(r"field [\"']([^\"']+)[\"'] .*doesn't exist", msg)
+            hit = [b for b in bad if b in wanted]
+            if hit:
+                for b in hit:
+                    wanted.remove(b)
+                    dropped.append(b)
+                if not wanted:
+                    # Every optional field was rejected. roundNumber,
+                    # roundResolved and roundOpenTime are in the template and
+                    # always requested, so the query is still valid — go once
+                    # more and take the rounds without any metric rather than
+                    # returning nothing.
+                    continue
+                continue
+            return [], dropped, msg[:140]
+        node = (d.get("data") or {}).get(profile) or {}
+        return node.get("roundModelPerformances") or [], dropped, ""
+    return [], dropped, "gave up stripping fields"
+
+
 def fetch(model):
     attempts = []
     try:
@@ -79,20 +125,14 @@ def fetch(model):
 
     fields = " ".join(dict.fromkeys(CORR_KEYS + MMC_KEYS + ["payout"]))
     for profile in ("v3UserProfile", "v2SignalsProfile", "signalsUserProfile"):
-        q = ("query($m: String!) { %s(modelName: $m) { roundModelPerformances "
-             "{ roundNumber roundResolved roundOpenTime %s } } }" % (profile, fields))
-        try:
-            d = gql(q, {"m": model})
-        except Exception as e:  # noqa: BLE001
-            attempts.append(f"{profile}: {type(e).__name__}: {e}")
-            continue
-        if d.get("errors"):
-            attempts.append(f"{profile}: {d['errors'][0].get('message','')[:120]}")
-            continue
-        rows = ((d.get("data") or {}).get(profile) or {}).get("roundModelPerformances") or []
+        rows, dropped, err = _query_with_fallback(
+            profile, model, CORR_KEYS + MMC_KEYS + ["tc"] + ["payout"], gql)
+        if dropped:
+            attempts.append(f"{profile}: schema rejected {', '.join(dropped)}")
         if rows:
             return rows, profile
-        attempts.append(f"{profile}: no roundModelPerformances")
+        if err:
+            attempts.append(f"{profile}: {err}")
     return [], "\n  ".join(attempts)
 
 
