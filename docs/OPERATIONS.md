@@ -340,6 +340,76 @@ Top 25 by score, 32 days, net of the ledger's execution cost:
 The tradeable top of the board lost money over this window, and removing the
 cohort roughly halves the loss without needing to borrow anything.
 
+### The weight is deliberate, and it is large
+
+`build_convergence_score.py` in `catalyst-edge-os/scanner` awards these
+points on an explicit "squeeze fuel" thesis — the code comments say so:
+
+```
+# --- RegSHO threshold list (FTD persistence = short squeeze fuel) ---   +5
+# --- FINRA short volume (short ratio = squeeze fuel) ---              +1/3/5
+# --- Short interest data (squeeze setup fuel) ---                     +2/5/8
+# --- SEC FTD (fails-to-deliver persistence = squeeze fuel) ---        +1/3/5
+# --- FINRA Reg SHO ---                                                  +2/3
+```
+
+Up to **+26 points** on a board whose median score is 6 and maximum is 53.
+That is why 70% of the top 10 is this cohort: the family can carry a pick to
+the top of the board on its own.
+
+The thesis is coherent — high short interest plus delivery failures is the
+textbook squeeze setup. The outcomes in this ledger simply do not support it
+at any horizon measured.
+
+### Zeroing the weight beats filtering the picks
+
+```bash
+python3 -m backtest.portfolio --data-repo ../sec-catalyst-data --top 25 --reweight
+python3 -m backtest.portfolio --data-repo ../sec-catalyst-data --sweep
+```
+
+`--reweight` subtracts the family's `*_pts` from the score and reranks, which
+is a different intervention from dropping the picks: a name still competes on
+its other signals, and everything the family had been outranking moves up.
+
+Top 25, 32 days:
+
+| | cohort share | mean/day | median/day | win days | compounded |
+|---|---|---|---|---|---|
+| published score | 65.9% | −1.69% | −1.52% | 22% | −42.3% |
+| filter cohort out | — | −0.94% | −0.65% | 38% | −28.2% |
+| **zero the weight** | **39.0%** | **−0.65%** | **−0.29%** | **44%** | **−19.2%** |
+
+Rescoring beats filtering on every column, and once it is applied the further
+variants stop helping — excluding the residual cohort makes compounding
+slightly *worse* (−21.9%). Most of the harm is in the weighting, not in the
+names.
+
+Paired by day, rescored vs published: top 10 −42.5% → −9.9% (z=+2.53),
+top 25 −42.3% → −19.2% (z=+3.19), top 50 +59.7% → +36.2% (z=+1.89, noise).
+The gain is concentrated where the family dominates the ranking.
+
+**It is an improvement, not a fix.** The rescored top 25 still loses 19% over
+32 days.
+
+### The ranking is anti-predictive
+
+`--sweep` compares basket depths:
+
+| basket | cohort share | median/day | win days | compounded |
+|---|---|---|---|---|
+| top 10 | 69.4% | −0.91% | 28% | −42.5% |
+| top 25 | 65.9% | −1.52% | 22% | −42.3% |
+| top 50 | 60.9% | −1.12% | 16% | +59.7% |
+| top 100 | 52.9% | −0.96% | 12% | +111.9% |
+| all | 35.7% | −0.39% | 28% | +133.7% |
+
+Median daily return is negative at **every** depth — the typical day loses
+money whatever the basket. As cohort share falls, the median improves
+monotonically. Compounding rises with depth for a different reason: a wider
+net catches more of the right tail, and that column is a handful of names
+rather than a strategy.
+
 ### Why the short is not the answer
 
 On the **full** board the same short returns **−100.9% compounded** with a

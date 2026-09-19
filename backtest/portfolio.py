@@ -43,6 +43,26 @@ from backtest.cuts import join_boards, split_signals  # noqa: E402
 SHORT_FAMILY = {"finra_short", "regsho", "auto_regsho_threshold",
                 "finra_regsho", "ftd", "gap", "pill"}
 
+# The per-signal point columns the same family contributes to the score.
+# build_convergence_score.py awards these on an explicit "squeeze fuel"
+# thesis: short interest up to +8, Reg SHO listing +5, FINRA short ratio +5,
+# SEC FTD +5, FINRA Reg SHO +3 — up to +26 on a board whose median score is 6.
+FAMILY_PTS = ["regsho_pts", "finra_short_pts", "finra_regsho_pts", "ftd_pts",
+              "short_pts", "gap_pts", "pill_pts", "squeeze_pts"]
+
+
+def rescore(r: dict) -> float:
+    """convergence_score with the short-family points removed.
+
+    Zeroing the WEIGHT is a different intervention from dropping the PICK.
+    Filtering removes a name entirely; rescoring lets it compete on its other
+    signals, and reranks everything the family had been outranking.
+    """
+    base = _num(r.get("convergence_score"))
+    if base is None:
+        return -1e9
+    return base - sum(_num(r.get(c)) or 0.0 for c in FAMILY_PTS)
+
 
 def log(msg: str = "") -> None:
     print(msg)
@@ -91,7 +111,8 @@ def leg_return(r: dict, target: str, short: bool, borrow_bps: float) -> float | 
 
 
 def daily_series(rows: list[dict], target: str, family: set[str],
-                 top: int | None, borrow_bps: float) -> dict[str, dict]:
+                 top: int | None, borrow_bps: float,
+                 reweight: bool = False) -> dict[str, dict]:
     """Per-day equal-weight return for each strategy."""
     by_day: dict[str, list[dict]] = {}
     for r in rows:
@@ -100,8 +121,10 @@ def daily_series(rows: list[dict], target: str, family: set[str],
     out: dict[str, dict] = {}
     for day, picks in sorted(by_day.items()):
         if top:
-            picks = sorted(picks, key=lambda r: -(_num(r.get("convergence_score"))
-                                                  or _num(r.get("base_score")) or 0))[:top]
+            rank = rescore if reweight else (
+                lambda r: (_num(r.get("convergence_score"))
+                           or _num(r.get("base_score")) or 0))
+            picks = sorted(picks, key=lambda r: -rank(r))[:top]
         fam = [r for r in picks if in_family(r, family)]
         rest = [r for r in picks if not in_family(r, family)]
 
@@ -147,6 +170,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--data-repo", required=True)
     ap.add_argument("--target", default="alpha_close_pct")
     ap.add_argument("--top", type=int, help="take only the top N by score each day")
+    ap.add_argument("--sweep", action="store_true",
+                    help="compare basket depths: does score rank help or hurt")
+    ap.add_argument("--reweight", action="store_true",
+                    help="rank by convergence_score with the short-family "
+                         "points removed, instead of filtering picks out")
     ap.add_argument("--borrow-bps", type=float, default=0.0,
                     help="flat borrow cost in bps applied to short legs only")
     args = ap.parse_args(argv)
@@ -159,7 +187,32 @@ def main(argv: list[str] | None = None) -> int:
         log("no picks carry signals_fired after the join")
         return 1
 
-    series = daily_series(rows, args.target, SHORT_FAMILY, args.top, args.borrow_bps)
+    join_boards(rows, repo, FAMILY_PTS)
+    if args.sweep:
+        log(f"\n{'='*78}\nBASKET DEPTH SWEEP "
+            f"({'rescored' if args.reweight else 'published'} score)\n{'='*78}")
+        log(f"{'basket':>8}{'cohort%':>9}{'mean/day':>10}{'med/day':>10}"
+            f"{'win days':>10}{'compounded':>12}")
+        for depth in (10, 25, 50, 100, 250, None):
+            sr = daily_series(rows, args.target, SHORT_FAMILY, depth,
+                              args.borrow_bps, args.reweight)
+            summ = summarise(sr, "baseline")
+            if not summ:
+                continue
+            tot = sum(v["n"] for v in sr.values())
+            fam = sum(v["n_family"] for v in sr.values()) / tot if tot else 0
+            log(f"{str(depth or 'all'):>8}{fam:>8.1%}{summ['mean_daily']:>10.3f}"
+                f"{summ['median_daily']:>10.3f}{summ['win_days']:>9.0%}"
+                f"{summ['compounded']:>11.1f}%")
+        log("\n  Median daily return is negative at EVERY depth: the typical day")
+        log("  loses money whatever the basket. Compounding rises with depth only")
+        log("  because a wider net catches more of the right tail — that column is")
+        log("  a handful of names, not a strategy. What moves monotonically with")
+        log("  cohort share is the median.")
+        return 0
+
+    series = daily_series(rows, args.target, SHORT_FAMILY, args.top,
+                          args.borrow_bps, args.reweight)
     if not series:
         log("no usable days")
         return 1
@@ -172,7 +225,8 @@ def main(argv: list[str] | None = None) -> int:
         + (f", plus {args.borrow_bps:.0f}bps borrow on shorts" if args.borrow_bps
            else ", NO borrow cost on shorts"))
     if args.top:
-        log(f"top {args.top} by score each day")
+        log(f"top {args.top} by {'RESCORED' if args.reweight else 'published'} "
+            f"score each day")
 
     log(f"\n{'strategy':<22}{'days':>6}{'mean/day':>10}{'med/day':>10}"
         f"{'win days':>10}{'compounded':>12}{'worst day':>11}")

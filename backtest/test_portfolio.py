@@ -68,6 +68,36 @@ def main() -> int:
           == summarise(series, "excluded")["mean_daily"],
           "an enormous borrow cost cannot change the exclude-only variant")
 
+    print("rescoring")
+    from backtest.portfolio import FAMILY_PTS, rescore
+    r = {"convergence_score": "20", "regsho_pts": "5", "ftd_pts": "3",
+         "insider_pts": "4"}
+    check(abs(rescore(r) - 12.0) < 1e-9,
+          "subtracts only the family's points (20 - 5 - 3 = 12)")
+    check(abs(rescore({"convergence_score": "20", "insider_pts": "4"}) - 20.0) < 1e-9,
+          "leaves a pick with no family points untouched")
+    check(rescore({"convergence_score": ""}) < -1e8,
+          "an unscored pick ranks last, not first")
+    check("short_pts" in FAMILY_PTS and "insider_pts" not in FAMILY_PTS,
+          "the family list covers the short signals and nothing else")
+
+    # Rescoring must actually rerank: a pick carried by family points alone
+    # has to lose its place to one scoring on other signals.
+    rows2 = []
+    for d in range(10):
+        day = f"2026-08-{d+1:02d}"
+        for i in range(5):
+            rows2.append({**mk(day, f"FAM{i}", -2.0, True),
+                          "convergence_score": "30", "regsho_pts": "25"})
+            rows2.append({**mk(day, f"OTH{i}", 1.0, False),
+                          "convergence_score": "20", "regsho_pts": "0"})
+    pub = daily_series(rows2, "alpha_close_pct", FAM, 5, 0, False)
+    resc = daily_series(rows2, "alpha_close_pct", FAM, 5, 0, True)
+    check(summarise(pub, "baseline")["mean_daily"] < 0,
+          "published ranking picks the family names and loses")
+    check(summarise(resc, "baseline")["mean_daily"] > 0,
+          "rescoring reranks them out and the basket turns positive")
+
     print("paired test")
     z, n = wilcoxon([0.5] * 20)
     check(z > 3 and n == 20, "detects a consistent one-sided difference")
