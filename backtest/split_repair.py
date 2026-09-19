@@ -50,8 +50,18 @@ from backtest.evaluate import _num, find_ledger, load_ledger  # noqa: E402
 
 # Ratios exchanges actually use for reverse splits.
 STANDARD = [2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200]
-SNAP_TOL = 0.25      # accept a ratio within 25% of a standard one
+# A real split lands on its ratio exactly. NYMXF's level shift is 100.0x,
+# which snaps to 1:100 with zero residual. ROYL's is 6.5x, 8% off 1:6 — that
+# gap is the tell that it is not a clean corporate action, or that the quotes
+# are too coarse to resolve one. 5% keeps the first and rejects the second.
+SNAP_TOL = 0.05
 MIN_JUMP = 5.0       # below this, treat a move as a trade, not an action
+# A repair is supposed to leave a NORMAL return behind. If it leaves a large
+# one the ratio is probably wrong, so the row is reported but kept out of the
+# corrected aggregate. This is a confidence check on a ratio already inferred
+# independently — not a way of choosing the ratio, which would assume the
+# answer.
+MAX_PLAUSIBLE_REPAIR = 25.0
 
 
 def log(msg: str = "") -> None:
@@ -112,8 +122,9 @@ def infer_ratio(series: dict[str, float], pick_date: str) -> tuple[int | None, s
         return None, "no persistent level shift"
     s = snap(hi / lo)
     if s is None:
-        return None, f"level shift {hi/lo:.1f}x is not a standard ratio"
-    return s, f"{hi/lo:.1f}x -> 1:{s}"
+        return None, (f"level shift {hi/lo:.2f}x is not within {SNAP_TOL:.0%} "
+                      f"of a standard ratio")
+    return s, f"{hi/lo:.2f}x -> 1:{s} (residual {abs(hi/lo - s)/s:.1%})"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -162,6 +173,15 @@ def main(argv: list[str] | None = None) -> int:
             why = f"{dwhy}; {why}"
         if ratio and fc and nc:
             true = (nc / (fc * ratio) - 1) * 100
+            if abs(true) > MAX_PLAUSIBLE_REPAIR:
+                why = (f"1:{ratio} implies {true:+.0f}% — too large to trust, "
+                       f"not applied")
+                if key not in seen:
+                    log(f"  {r['ticker']:8}{r['list_date']:12}{stored:>10.1f}"
+                        f"{('1:%d?' % ratio):>8}{'-':>9}  {why}")
+                unrepaired += 1
+                seen.add(key)
+                continue
             r["_true_pct"], r["_ratio"] = true, ratio
             if key not in seen:
                 log(f"  {r['ticker']:8}{r['list_date']:12}{stored:>10.1f}"

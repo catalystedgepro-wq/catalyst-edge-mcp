@@ -66,6 +66,35 @@ python3 patches/fix_published_summary.py \
 
 It prints a before/after table and only writes with `--write`.
 
+## Everything still pending, in one command
+
+```bash
+./scripts/finish-deployment.sh            # dry run
+./scripts/finish-deployment.sh --write    # apply
+```
+
+Four independent pieces in dependency order — regenerate the summary, repair
+the splits, install the Numerai collector and backfill, then report. Each
+reports separately so one failure does not hide the others, and each is
+idempotent, so re-running after a partial failure is safe.
+
+## Patch 0003 — silent social failures and the missing podcast
+
+Every step in the daily pipeline's social phase ended in
+`|| echo "x failed"`. That prints a line and lets the job go green, so a
+poster can be broken for months with every run showing success. It is the
+same failure mode that hid six months of uncollected Numerai scoring.
+
+`generate_voice_content.py` is also in the repo but referenced by **no**
+workflow, so the podcast audio the site advertises was never generated at
+all.
+
+0003 replaces the pattern with a `social` helper that records each failure,
+emits a GitHub Actions annotation so it surfaces in the UI, and wires the
+voice generation in. One platform failing still does not fail the pipeline —
+that is normal. All of them failing does, because that is credentials or the
+runner, not the platforms.
+
 ## One command
 
 ```bash
