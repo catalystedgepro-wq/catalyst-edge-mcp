@@ -312,6 +312,56 @@ If the scanner treats these as bullish squeeze setups, the data says the
 opposite over every horizon measurable here. That is worth acting on before
 anything is fine-tuned.
 
+### Quantifying it: exclude vs invert
+
+```bash
+python3 -m backtest.portfolio --data-repo ../sec-catalyst-data
+python3 -m backtest.portfolio --data-repo ../sec-catalyst-data --top 25 --borrow-bps 50
+```
+
+Each pick date forms an equal-weight basket; variants are compared to the
+baseline paired by day (Wilcoxon signed-rank), so both always face the same
+tape.
+
+**The score concentrates the bad cohort.** Share of the board that is short /
+Reg SHO, by score rank: top 10 **70.6%**, top 25 66.0%, top 50 60.8%, top 100
+52.8%, whole board 35.7%. The higher the convergence score, the likelier the
+pick is in the cohort that underperforms.
+
+Top 25 by score, 32 days, net of the ledger's execution cost:
+
+| strategy | mean/day | median/day | win days | compounded |
+|---|---|---|---|---|
+| long all (baseline) | −1.69% | −1.52% | 22% | **−42.3%** |
+| exclude cohort | −0.94% | −0.65% | 38% | −28.2% |
+| invert cohort | +0.70% | +0.77% | 62% | +24.4% |
+| short cohort only | +1.52% | +1.19% | 78% | +60.9% |
+
+The tradeable top of the board lost money over this window, and removing the
+cohort roughly halves the loss without needing to borrow anything.
+
+### Why the short is not the answer
+
+On the **full** board the same short returns **−100.9% compounded** with a
+worst day of −102%, while still winning 72% of days. The cohort contains a
+single position that gained **+3,770%** in a day, and ten that gained over
+100%. One such name at 0.8% weight costs a short book 29.7% in a session.
+
+The top-25 cohort happens to contain nothing above +25% across these 32 days.
+That is a property of a small window, not a safety guarantee — the cohort
+demonstrably produces +3,770% moves, and one landing in the top 25 erases
+years of the drift. `--borrow-bps` shows the rest: the full-board short is
+already gone at 50bps/day, and Reg SHO threshold listing is by construction a
+hard-to-borrow marker that this ledger's flat `exec_cost_pct` does not price.
+
+**A median-based test measures the typical day; a short book is killed by the
+tail.** The same skew that makes rank tests the right way to *detect* this
+effect makes them the wrong way to *size* a short against it. The simulator
+prints the right-tail distribution on every run for that reason.
+
+Exclusion is the change that needs no borrow, has no unbounded downside, and
+is testable against 42 dates of real outcomes today.
+
 ### Reconstructing longer holds
 
 The ledger carries one forward day per row. A longer hold is recoverable only
