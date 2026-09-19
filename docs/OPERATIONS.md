@@ -450,6 +450,55 @@ out-of-sample Kronos evaluation gets built. A retrospective backfill is faster
 but a pretrained forecaster may have seen the period in training, which
 flatters it.
 
+## Numerai: six months of independent scoring you have not collected
+
+`build_numerai_signals.py` submits the **percentile rank of
+convergence_score** (plus a ±0.10 DCF grade tilt) to Numerai Signals, weekly.
+Numerai has therefore been grading that exact score — out-of-sample, on
+20-day forward returns, neutralised against its own risk factors, by a party
+with no reason to flatter it — since at least round 1253 (2026-04-30).
+
+Nothing in this stack has ever pulled those scores back. `submit_numerai.py`
+records that a submission was accepted; no file anywhere records how it did.
+
+It is a far better referee than any internal backtest:
+
+| | internal ledger | Numerai |
+|---|---|---|
+| sample | 32 pick dates | ~20+ resolved rounds |
+| horizon | next day | 20 days forward |
+| returns | raw, self-computed | neutralised against their factors |
+| scored by | our own join logic | them |
+
+```bash
+python3 -m backtest.numerai_scores --model YOUR_MODEL --save rounds.json
+python3 -m backtest.numerai_scores --from-json rounds.json   # if the API path fails
+```
+
+### Write down the prediction before you run it
+
+The internal ledger says `convergence_score` is anti-predictive — its top
+decile is 70% short/RegSHO names that underperform, and zeroing that weight
+improves every column. The Numerai submission ranks **bullish** by that same
+score. So mean correlation should come back at or below zero.
+
+- **Negative and consistent** → the internal finding confirmed on six times
+  the data with better methodology, and the fix is a sign flip:
+  `load_convergence_rank()` sorts ascending so rank 0 is most bearish;
+  reversing it is one line. A signal that is reliably wrong is worth exactly
+  what one that is reliably right is worth.
+- **Indistinguishable from zero** → consistent with the ledger's "no
+  separation at any horizon", and the score needs rebuilding rather than
+  reversing.
+- **Reliably positive** → the internal finding is wrong, or specific to the
+  next-day horizon. Numerai scores 20 days out on a different universe after
+  neutralisation; a score that is bad for next-day moves can be good over a
+  month. That disagreement is worth more than either result alone — but do
+  not act on either until you know which horizon you are trading.
+
+The tool prints whichever of these applies and will not soften a result
+because it is unwelcome.
+
 ## Usage logging — the gap
 
 `get_convergence_picks` and `get_track_record` are open on the free tier, so
