@@ -66,10 +66,38 @@ python3 patches/fix_published_summary.py \
 
 It prints a before/after table and only writes with `--write`.
 
-## Not fixed here
+## The root cause, and the actual repair
 
-The root cause is that prices are not split-adjusted upstream. The price
-floor is a guard, not a repair — it will keep excluding legitimate low-priced
-picks along with the artifacts. The real fix is adjusting for corporate
-actions when the OHLCV is fetched, which needs a split/dividend feed this
-codebase does not currently pull.
+The price floor above is a guard. `backtest/split_repair.py` is the repair.
+
+The bug is a units mismatch: `filing_day_close` is captured live before the
+split and `next_close` after it, so the stored pair is quoted in two
+different price regimes and their ratio is meaningless.
+
+```bash
+# best: read the truth off a split-adjusted series
+python3 -m kronos_pipeline.ohlcv --from-convergence          # build the cache
+python3 -m backtest.split_repair --data-repo ../sec-catalyst-data \
+        --ohlcv-dir /opt/catalyst/ohlcv --write
+```
+
+Tradier's history endpoint returns split-adjusted prices, so both legs land
+in the same post-split units and the corporate action cancels out by
+construction. No ratio is inferred and nothing is assumed about the size of
+the true return. Verified on a fixture: a ledger pair reading +5100% across a
+split resolves to the real +4.0%.
+
+Without the cache the tool falls back to the ledger's own evidence — a
+reverse split is a *persistent* level shift, so a ticker observed on both
+sides of it reveals its ratio:
+
+```
+NYMXF  $0.0002, $0.0002  ->  $0.02   exactly 100x, and it stays
+       repaired to 0.00%, which is correct: a reverse split moves no value
+```
+
+That path repaired 4 of 39 on the current ledger. The other 35 are the last
+observation of that ticker, so there is no "after" to compare against and the
+tool reports them rather than guessing. **Run it with `--ohlcv-dir` on the
+droplet and all 39 resolve** — that is the one-line difference between
+detecting the problem and fixing it.
