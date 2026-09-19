@@ -252,6 +252,76 @@ therefore the exit rule inside day one — `gap_next_open_pct`,
 bracket net of cost) — not a multi-day hold. Multi-day holds would need price
 history the ledger does not carry.
 
+### Subgroup cuts
+
+`backtest/cuts.py` asks a different question from `evaluate.py`: not "does
+this score rank picks" but "does any subgroup behave differently".
+
+```bash
+python3 -m backtest.cuts --data-repo ../sec-catalyst-data --conviction
+python3 -m backtest.cuts --data-repo ../sec-catalyst-data --signals
+python3 -m backtest.cuts --data-repo ../sec-catalyst-data --hold 5 \
+    --hold-signals finra_short regsho ftd gap finra_regsho
+```
+
+Subgroup analysis fails in three specific ways, and all three were hit for
+real on this ledger, so the tool defends against each:
+
+**Confounding by date.** The conviction scheme changed mid-period — August
+boards are ~90% AVOID, September ~80% WATCH, and ELEVATED barely existed
+before September. Unblocked, `ELEVATED` looked significant at t = -2.92.
+Compared only against picks from the *same pick date* it is t = -0.76: the
+entire effect was the calendar. Every subgroup test is date-blocked.
+
+**Right-skew.** `alpha_close_pct` has mean +4.3% and median -0.3% in the same
+cohort — a few enormous winners drag every mean positive while the typical
+pick loses. Tests are therefore Mann-Whitney within each date, pooled (van
+Elteren), reporting medians. Switching from means to ranks cut the
+"significant" signal count from 35 to 16.
+
+**The search itself.** 68 signal tokens and ~900 `*_pts` columns; at p < 0.05
+roughly 45 come back significant on pure noise. Every family prints its
+Bonferroni-corrected bar, the uncorrected count, and how many hits chance
+alone predicts.
+
+Five signals fire on >=99% of picks (`auto_macro_crypto_fear_greed`,
+`auto_macro_eia_petroleum`, `auto_macro_options_gex`,
+`auto_macro_term_premium`, `auto_macro_wiki_pageviews`). They cannot
+discriminate and only inflate the score; the tool lists and excludes them.
+
+### The one finding that survived
+
+Picks firing the short / Reg SHO family — `finra_short`, `regsho`,
+`auto_regsho_threshold`, `finra_regsho`, `ftd`, `gap`, `pill` — **underperform
+systematically**. These overlap heavily (`regsho` and `auto_regsho_threshold`
+are identical sets; `finra_regsho` and `finra_short` overlap 95%), so it is
+one effect, not seven.
+
+| hold | median, family | median, rest | z | n |
+|---|---|---|---|---|
+| 1 day | -0.66% | -0.10% | -6.82 | 4071 |
+| 5 days | -4.47% | +0.00% | -7.62 | 626 |
+| 10 days | -4.03% | +0.00% | -5.13 | 488 |
+
+It holds on all four next-day exit rules (z -6.3 to -12.1), survives
+Bonferroni, survives date-blocking, and grows with holding period. The 5d and
+10d rows come from the reconstructed-hold subset and carry its selection
+bias; the 1d row does not.
+
+If the scanner treats these as bullish squeeze setups, the data says the
+opposite over every horizon measurable here. That is worth acting on before
+anything is fine-tuned.
+
+### Reconstructing longer holds
+
+The ledger carries one forward day per row. A longer hold is recoverable only
+where the same ticker reappears on a later pick date, supplying another dated
+close — about 19% of picks at 5 days, 14% at 10.
+
+**That subset is self-selected**: a ticker reappears because it keeps firing
+signals. Treat reconstructed holds as a hypothesis generator, never as a
+backtest. `--hold N` prints coverage and this warning on every run.
+
 ### Forward accumulation still matters
 
 `backtest.snapshot` remains worth running nightly: the published ledger has no
