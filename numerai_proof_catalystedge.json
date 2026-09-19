@@ -1,0 +1,128 @@
+[
+  {
+    "roundNumber": 1253,
+    "roundResolved": true,
+    "corr20V2": -0.02418288110413792,
+    "mmc": -0.005351345798605279
+  },
+  {
+    "roundNumber": 1254,
+    "roundResolved": true,
+    "corr20V2": -0.03421795671278348,
+    "mmc": -0.006473743370187107
+  },
+  {
+    "roundNumber": 1255,
+    "roundResolved": true,
+    "corr20V2": -0.006476579463249428,
+    "mmc": -0.0058869852648609266
+  },
+  {
+    "roundNumber": 1256,
+    "roundResolved": true,
+    "corr20V2": 0.006241284517264283,
+    "mmc": -0.018850761647327664
+  },
+  {
+    "roundNumber": 1257,
+    "roundResolved": true,
+    "corr20V2": -0.02365220662612272,
+    "mmc": -0.017052173511442364
+  },
+  {
+    "roundNumber": 1258,
+    "roundResolved": true,
+    "corr20V2": -0.0406717651297976,
+    "mmc": -0.011838582672186796
+  },
+  {
+    "roundNumber": 1259,
+    "roundResolved": true,
+    "corr20V2": -0.02057433345484525,
+    "mmc": -0.0058102173216451995
+  },
+  {
+    "roundNumber": 1260,
+    "roundResolved": true,
+    "corr20V2": -0.014837275738769177,
+    "mmc": 0.012337105675761463
+  },
+  {
+    "roundNumber": 1261,
+    "roundResolved": true,
+    "corr20V2": -0.0077487718353111724,
+    "mmc": -0.025945277084980123
+  },
+  {
+    "roundNumber": 1262,
+    "roundResolved": true,
+    "corr20V2": -0.020912469465395902,
+    "mmc": -0.016230355903116073
+  },
+  {
+    "roundNumber": 1263,
+    "roundResolved": true,
+    "corr20V2": -0.03531495296806192,
+    "mmc": 0.003062263463739048
+  },
+  {
+    "roundNumber": 1264,
+    "roundResolved": true,
+    "corr20V2": -0.029458761796092553,
+    "mmc": -0.029512809429546726
+  },
+  {
+    "roundNumber": 1265,
+    "roundResolved": true,
+    "corr20V2": -0.018788257288893384,
+    "mmc": -0.01291474412133037
+  },
+  {
+    "roundNumber": 1266,
+    "roundResolved": true,
+    "corr20V2": -0.04848843038023594,
+    "mmc": -0.019210851631273135
+  },
+  {
+    "roundNumber": 1267,
+    "roundResolved": true,
+    "corr20V2": -0.0375055454564163,
+    "mmc": -0.010234017121581092
+  },
+  {
+    "roundNumber": 1268,
+    "roundResolved": true,
+    "corr20V2": -0.03353409678218329,
+    "mmc": -0.009285300899491014
+  },
+  {
+    "roundNumber": 1269,
+    "roundResolved": true,
+    "corr20V2": 0.011724609251753157,
+    "mmc": -0.01800252756580032
+  },
+  {
+    "roundNumber": 1270,
+    "roundResolved": true,
+    "corr20V2": -0.041148866609196914,
+    "mmc": -0.012491734181439892
+  },
+  {
+    "roundNumber": 1271,
+    "roundResolved": true,
+    "corr20V2": -0.003088938870097424,
+    "mmc": -0.017062169841246547
+  },
+  {
+    "roundNumber": 1272,
+    "roundResolved": true,
+    "corr20V2": 0.00368568938782856,
+    "mmc": -0.02308112292384581
+  },
+  {
+    "roundNumber": 1273,
+    "roundResolved": true,
+    "corr20V2": -0.04564686105075959,
+    "mmc": -0.010543567477905786
+  }
+]
