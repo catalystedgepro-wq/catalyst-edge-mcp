@@ -1,0 +1,52 @@
+diff --git a/evaluate_sec_outcomes.py b/evaluate_sec_outcomes.py
+index 6fa6b94..fad882a 100644
+--- a/evaluate_sec_outcomes.py
++++ b/evaluate_sec_outcomes.py
+@@ -340,6 +340,13 @@ def build_spy_lookup(cache: dict[str, Any]) -> dict[str, dict[str, float]]:
+     return out
+ 
+ 
++# Investable-universe guard. A $0.0002 quote is not tradable, and an
++# unadjusted reverse split on one reads as a +9900% return — enough for
++# nineteen rows out of 13,760 to flip a list's mean from negative to positive.
++PRICE_FLOOR = 1.00
++MAX_PLAUSIBLE_MOVE = 100.0
++
++
+ def summarize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+     grouped: dict[str, list[dict[str, Any]]] = {}
+     for r in rows:
+@@ -351,6 +358,14 @@ def summarize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+         if not grp:
+             continue
+         n = len(grp)
++        # Same rows, restricted to prices someone could actually trade.
++        investable = [
++            x
++            for x in grp
++            if to_float(x.get("filing_day_close", 0)) >= PRICE_FLOOR
++            and abs(to_float(x.get("next_day_close_pct", 0))) <= MAX_PLAUSIBLE_MOVE
++        ]
++        inv_alphas = [to_float(x.get("alpha_close_pct", 0)) for x in investable]
+         max_runs = [to_float(x["next_day_max_run_pct"]) for x in grp]
+         gap_opens = [to_float(x["gap_next_open_pct"]) for x in grp]
+         close_moves = [to_float(x["next_day_close_pct"]) for x in grp]
+@@ -401,6 +416,18 @@ def summarize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+                 "hit_rate_5pct": f"{(hits5 / n) * 100:.2f}",
+                 "hit_rate_2pct_net": f"{(hits2_net / n) * 100:.2f}",
+                 "avg_alpha_close_pct": f"{statistics.fmean(alphas):.4f}" if alphas else "0",
++                # The figure to display. The raw mean above is kept unchanged
++                # so the historical series and downstream consumers survive.
++                "avg_alpha_close_pct_investable": (
++                    f"{statistics.fmean(inv_alphas):.4f}" if inv_alphas else "0"
++                ),
++                # Nineteen rows cannot move a median, so for a distribution
++                # this skewed it is the honest description of a typical pick.
++                "median_alpha_close_pct": (
++                    f"{statistics.median(alphas):.4f}" if alphas else "0"
++                ),
++                "investable_rows": str(len(investable)),
++                "excluded_rows": str(n - len(investable)),
+                 "avg_realistic_pnl_pct": f"{statistics.fmean(real_pnl):.4f}" if real_pnl else "0",
+                 "avg_realistic_pnl_net_pct": (
+                     f"{statistics.fmean(real_pnl_net):.4f}" if real_pnl_net else "0"

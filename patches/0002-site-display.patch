@@ -1,0 +1,20 @@
+diff --git a/generate_seo_site.py b/generate_seo_site.py
+index 7d538bd..cf9299a 100644
+--- a/generate_seo_site.py
++++ b/generate_seo_site.py
+@@ -4554,7 +4554,14 @@ def main():
+     _loss_rate = (100.0 * _losses / (_wins + _losses)) if (_wins + _losses) else 0.0
+     # Fix #2 — Alpha vs SPY (excess return after baseline subtraction).
+     try:
+-        _avg_alpha = float(_g.get("avg_alpha_close_pct", 0) or 0)
++        # Prefer the investable-universe figure: the raw mean is inflated by
++        # unadjusted reverse splits on sub-$1 stocks. Falls back to the old
++        # column so pages still render against pre-patch summary files.
++        _avg_alpha = float(
++            _g.get("avg_alpha_close_pct_investable")
++            or _g.get("avg_alpha_close_pct", 0)
++            or 0
++        )
+     except Exception:
+         _avg_alpha = 0.0
+     # Fix #6 — prefer holdout (out-of-sample) hit rate if available.
