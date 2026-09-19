@@ -29,8 +29,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 API = "https://api-tournament.numer.ai/graphql"
-CORR_KEYS = ["corr20V2", "corrV4", "corr20", "corr", "icV2", "ic"]
-MMC_KEYS = ["mmc", "mmcV2", "tc"]
+# Metric field names, newest first. Verified 2026-09-19 against
+# numerai/numerai-tools scoring.py, which defines alpha() and
+# meta_portfolio_contribution() as first-class scoring functions, and against
+# Numerai's Feb-2026 announcement that Alpha replaced corr20V2 as the Signals
+# headline metric. The older names are kept as fallbacks for historical rounds
+# that were scored under them. Whichever name is found is recorded per row, so
+# the next rename shows up as data instead of a column of blanks.
+CORR_KEYS = ["alpha", "corr20V2", "corr20d", "corrV4", "corr20", "corr", "icV2", "ic"]
+MMC_KEYS = ["mpc", "mmc", "mmcV2"]
 
 
 def num(v):
