@@ -1,6 +1,6 @@
 # Catalyst Edge MCP Server
 
-**Audited SEC catalyst intelligence for AI agents**, over the [Model Context Protocol](https://modelcontextprotocol.io). Every US-market SEC filing with market-moving potential is fetched from EDGAR, scored by 500+ data engines, and ranked before the market opens — and unlike most signal products, the track record is public: every past call is published with its outcome at [catalystedgescanner.com/receipts](https://catalystedgescanner.com/receipts/).
+**Publicly graded SEC catalyst intelligence for AI agents**, over the [Model Context Protocol](https://modelcontextprotocol.io). Every US-market SEC filing with market-moving potential is fetched from EDGAR, scored by 500+ data engines, and ranked before the market opens — and unlike most signal products, the track record is public: every past call is published with its outcome at [catalystedgescanner.com/receipts](https://catalystedgescanner.com/receipts/).
 
 ## Use the hosted server (no install)
 
@@ -58,6 +58,6 @@ python3 smoke_test.py   # exit 0 = handshake + all tools OK
 
 ## Data & disclaimers
 
-Sources: SEC EDGAR (filings, XBRL, insider activity), US government open data, delayed market prices. Nothing here is financial advice; signals are research with a published, audited track record — hits and misses both. Machine-readable site map: [catalystedgescanner.com/llms.txt](https://catalystedgescanner.com/llms.txt) · OpenAPI: [/openapi.json](https://catalystedgescanner.com/openapi.json).
+Sources: SEC EDGAR (filings, XBRL, insider activity), US government open data, delayed market prices. Nothing here is financial advice; signals are research with a published, self-graded track record — hits and misses both, each measured against the next session's open. Machine-readable site map: [catalystedgescanner.com/llms.txt](https://catalystedgescanner.com/llms.txt) · OpenAPI: [/openapi.json](https://catalystedgescanner.com/openapi.json).
 
 MIT licensed.
